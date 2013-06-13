@@ -174,7 +174,7 @@ static struct touch_operation_role touch_role = {
 #if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
 	.show_touches			= 0,
 	.pointer_location		= 0,
-	.ta_debouncing_count    = 2,
+	.ta_debouncing_count    = 0,
 	.ghost_detection_enable = 1,
 #endif
 #if defined(CONFIG_TOUCH_REG_MAP_TM2000)

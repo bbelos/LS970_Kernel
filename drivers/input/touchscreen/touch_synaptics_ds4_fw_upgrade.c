@@ -166,7 +166,8 @@ int FirmwareUpgrade(struct synaptics_ts_data *ts, const char* fw_path){
 
 	switch( ts->ic_panel_type ) {
 
-		case IC7020_G2_H_PTN:
+		case IC7020_G2_H_PTN_TPK:
+		case IC7020_G2_H_PTN_LGIT:
 #if defined(CONFIG_MACH_APQ8064_GKKT) || defined(CONFIG_MACH_APQ8064_GKSK) || defined(CONFIG_MACH_APQ8064_GKU)
 			TOUCH_INFO_MSG("TOUCH FIRMWARE UPGRADE (1)\n");
 			break;

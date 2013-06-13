@@ -383,7 +383,7 @@ int synaptics_ts_get_data(struct i2c_client *client, struct touch_data* data)
 				for (cnt = 0; cnt < ts->pdata->caps->number_of_button; cnt++)
 				{
 #if defined(CONFIG_TOUCH_REG_MAP_TM2000)
-					if ( ((ts->ic_panel_type == IC7020_GFF || ts->ic_panel_type == IC7020_G2 || ts->ic_panel_type == IC7020_G2_H_PTN) && ((ts->ts_data.button_data_reg >> cnt) & 0x1)) ||
+					if ( ((ts->ic_panel_type == IC7020_GFF || ts->ic_panel_type == IC7020_G2 || ts->ic_panel_type == IC7020_G2_H_PTN_LGIT|| ts->ic_panel_type == IC7020_G2_H_PTN_TPK) && ((ts->ts_data.button_data_reg >> cnt) & 0x1)) ||
 						 ((ts->ic_panel_type == IC3203_G2) && ((ts->ts_data.button_data_reg >> (cnt << 1)) & 0x3)) ) {
 #elif defined(CONFIG_TOUCH_REG_MAP_TM2372)
 					if ((ts->ts_data.button_data_reg >> cnt) & 0x1) {
@@ -563,7 +563,11 @@ int get_ic_info(struct synaptics_ts_data* ts, struct touch_fw_info* fw_info)
 			ts->ic_panel_type = IC3203_G2;
 			TOUCH_INFO_MSG("IC is 3203, panel is G2.");
 		} else {
-			ts->ic_panel_type = IC7020_G2_H_PTN;
+			if(!strncmp(fw_info->product_id, "TM2369", 6)) {
+				ts->ic_panel_type = IC7020_G2_H_PTN_TPK;
+			} else {
+				ts->ic_panel_type = IC7020_G2_H_PTN_LGIT;
+			}
 			TOUCH_INFO_MSG("IC is 7020, H pattern, panel is G2.");
 
 			if((fw_info->fw_version[0] == 'E') && 
@@ -596,6 +600,22 @@ int get_ic_info(struct synaptics_ts_data* ts, struct touch_fw_info* fw_info)
 	fw_info->fw_start = (unsigned char *)&SynaFirmware[cnt][0];
 	fw_info->fw_size = sizeof(SynaFirmware[0]);
 #else
+#if defined(CONFIG_TOUCH_REG_MAP_TM2000)
+	switch(ts->ic_panel_type){
+		case IC7020_GFF:
+		case IC7020_G2:
+		case IC3203_G2:
+		case IC7020_G2_H_PTN_LGIT:
+			memcpy(&SynaFirmware[0], &SynaFirmware_TM2000[0], sizeof(SynaFirmware));
+			break;
+		case IC7020_G2_H_PTN_TPK:
+			memcpy(&SynaFirmware[0], &SynaFirmware_TM2369[0], sizeof(SynaFirmware));
+			break;
+		default:
+			TOUCH_ERR_MSG("UNKNOWN PANEL. SynaImage set error");
+			break;
+	}
+#endif
 	strncpy(fw_info->fw_image_product_id, &SynaFirmware[16], 10);
 #if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
 	strncpy(fw_info->fw_image_version, &SynaFirmware[0xb100],4);
@@ -840,11 +860,6 @@ int synaptics_ts_probe(struct i2c_client* client)
 
 	ts->client = client;
 	ts->pdata = client->dev.platform_data;
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000)
-	ts->ic_panel_type = IC7020_G2_H_PTN;
-#elif defined(CONFIG_TOUCH_REG_MAP_TM2372)
-	ts->ic_panel_type = IC7020_GFF_H_PTN;
-#endif
 
 	if (ts->pdata->pwr->use_regulator) {
 		ts->regulator_vdd = regulator_get_exclusive(NULL, ts->pdata->pwr->vdd);

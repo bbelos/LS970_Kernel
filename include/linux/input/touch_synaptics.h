@@ -86,7 +86,7 @@ struct synaptics_ts_data {
 };
 
 #if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
-enum {IC7020_GFF, IC7020_G2, IC3203_G2, IC7020_GFF_H_PTN, IC7020_G2_H_PTN};
+enum {IC7020_GFF, IC7020_G2, IC3203_G2, IC7020_GFF_H_PTN, IC7020_G2_H_PTN_LGIT, IC7020_G2_H_PTN_TPK};
 #endif
 
 /* extern function */
