@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2005-2012  NTT DATA CORPORATION
  *
- * Version: 1.8.3+   2011/11/11
+ * Version: 1.8.3+   2012/05/05
  */
 
 #ifndef _SECURITY_CCSECURITY_INTERNAL_H
@@ -373,6 +373,41 @@ static inline void __list_del_entry(struct list_head *entry)
 	}
 
 #endif
+
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+
+/**
+ * from_kuid - Convert kuid_t to uid_t.
+ *
+ * @ns:  Unused.
+ * @uid: kuid_t value.
+ *
+ * Returns uid seen from init's user namespace.
+ */
+#define from_kuid(ns, uid) (uid)
+
+/**
+ * from_kgid - Convert kgid_t to gid_t.
+ *
+ * @ns:  Unused.
+ * @gid: kgid_t value.
+ *
+ * Returns gid seen from init's user namespace.
+ */
+#define from_kgid(ns, gid) (gid)
+
+/**
+ * uid_eq - Check whether the uids are equals or not.
+ *
+ * @left: Uid seen from current user namespace.
+ * @right: Uid seen from current user namespace.
+ *
+ * Returns true if uid is root in init's user namespace, false otherwise.
+ */
+#define uid_eq(left, right) ((left) == (right))
+#define GLOBAL_ROOT_UID 0
 
 #endif
 
@@ -937,8 +972,13 @@ struct ccs_address_group {
 
 /* Subset of "struct stat". Used by conditional ACL and audit logs. */
 struct ccs_mini_stat {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+	kuid_t uid;
+	kgid_t gid;
+#else
 	uid_t uid;
 	gid_t gid;
+#endif
 	ino_t ino;
 	umode_t mode;
 	dev_t dev;
@@ -1220,7 +1260,6 @@ struct ccs_reserved {
 /* Structure for policy manager. */
 struct ccs_manager {
 	struct ccs_acl_head head;
-	bool is_domain;  /* True if manager is a domainname. */
 	/* A path to program or a domainname. */
 	const struct ccs_path_info *manager;
 };
@@ -1679,6 +1718,12 @@ static inline pid_t ccs_sys_getppid(void)
 	pid_t pid;
 	rcu_read_lock();
 #if (defined(RHEL_MAJOR) && RHEL_MAJOR == 5) || (defined(AX_MAJOR) && AX_MAJOR == 3)
+	pid = rcu_dereference(current->parent)->tgid;
+#elif defined(CONFIG_UTRACE)
+	/*
+	 * RHEL 5.0 kernel does not have RHEL_MAJOR/RHEL_MINOR defined.
+	 * Assume RHEL 5.0 if CONFIG_UTRACE is defined.
+	 */
 	pid = rcu_dereference(current->parent)->tgid;
 #else
 	pid = rcu_dereference(current->real_parent)->tgid;

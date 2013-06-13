@@ -9,6 +9,7 @@
 
 #include "snfc_available_poll.h"
 #include <linux/delay.h>
+#include <mach/board_lge.h>
 
 /*
  *  Define
@@ -37,7 +38,11 @@ static int isopen_snfcavailpoll = 0; // 0 : No open 1 : Open
  */
 static int __snfc_avail_poll_get_rfs_status(void)
 {
-	return snfc_gpio_read(GPIO_SNFC_RFS);
+	int return_val;
+	
+	return_val = snfc_gpio_read(gpio_rfs);				//Rev.B
+
+	return return_val;
 }
 /*
  * Description: 
@@ -59,16 +64,12 @@ static int __snfc_avail_poll_get_cen_status(void)
 	// check bit 7(locken)
 	if(read_buf&0x01) 
 	{
-		#ifdef FEATURE_DEBUG_LOW
-		SNFC_DEBUG_MSG("[__snfc_avail_poll_get_cen_status] CEN = High (UNLOCK) \n");
-		#endif
+		SNFC_DEBUG_MSG_LOW("[__snfc_avail_poll_get_cen_status] CEN = High (UNLOCK) \n");
 		cen_status = GPIO_HIGH_VALUE;
 	}
 	else  
 	{
-		#ifdef FEATURE_DEBUG_LOW
-		SNFC_DEBUG_MSG("[__snfc_avail_poll_get_cen_status] CEN = Low (LOCK) \n");
-		#endif
+		SNFC_DEBUG_MSG_LOW("[__snfc_avail_poll_get_cen_status] CEN = Low (LOCK) \n");
 		cen_status = GPIO_LOW_VALUE;
 	}	
 
@@ -86,17 +87,13 @@ static int snfc_avail_poll_open (struct inode *inode, struct file *fp)
 
 	if(isopen_snfcavailpoll == 1)
 	{
-		#ifdef FEATURE_DEBUG_LOW 
 		SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_open - already open \n");
-		#endif
 		return 0;
 	}
 
 	isopen_snfcavailpoll = 1;
-
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_open - end \n");
-	#endif
+	
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_open - end \n");
 
 	return rc;
 }
@@ -112,18 +109,14 @@ static int snfc_avail_poll_release (struct inode *inode, struct file *fp)
 
 	if(isopen_snfcavailpoll == 0)
 	{
-		#ifdef FEATURE_DEBUG_LOW 
 		SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_release - not opened \n");
-		#endif
 		return -1;
 	}
 
 	isopen_snfcavailpoll = 0;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_release - end \n");
-	#endif
-
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_release - end \n");
+	
 	return rc;
 }
 
@@ -139,11 +132,10 @@ static ssize_t snfc_avail_poll_read(struct file *pf, char *pbuf, size_t size, lo
 	int available_poll = -1;
 	int rc = -1;
 	int rfs_status = -1, cen_status = -1, uart_status = -1;
+	int loop_cnt;
 	//unsigned char restart_value=0;
 	
-	#ifdef FEATURE_DEBUG_LOW
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_read - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_read - start \n");
 
 	/* Check parameters */
 	if( NULL == pf || NULL == pbuf /*|| size == NULL*/ /*|| pos == NULL*/)
@@ -152,23 +144,28 @@ static ssize_t snfc_avail_poll_read(struct file *pf, char *pbuf, size_t size, lo
 		return -1;    
 	}
 
+	loop_cnt=0;
+
 	do{
+		loop_cnt++;
 		rfs_status = __snfc_avail_poll_get_rfs_status();
 		cen_status = __snfc_avail_poll_get_cen_status();
 		uart_status = __snfc_uart_control_get_uart_status();
-		SNFC_DEBUG_MSG("[snfc_avail_poll] current rfs_status : %d, cen_status : %d \n",rfs_status, cen_status);
+		if(loop_cnt == 1000)
+		{
+			SNFC_DEBUG_MSG_MIDDLE("[snfc_avail_poll] current rfs_status : %d, cen_status : %d, uart_status : %d \n",rfs_status, cen_status, uart_status);
+			loop_cnt = 0;
+		}
 		if(rfs_status == GPIO_HIGH_VALUE && cen_status == GPIO_HIGH_VALUE && uart_status != UART_STATUS_FOR_FELICA)
 			break;
-		msleep(10);
+		msleep(1);
 	}while(loop);
 
 	available_poll = 1;
 
 	rc = copy_to_user(pbuf, &available_poll, size);
 	
-	#ifdef FEATURE_DEBUG_LOW
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_read - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_read - end \n");
 
 	return 1;
 }
@@ -190,9 +187,7 @@ static int snfc_avail_poll_init(void)
 {
 	int rc;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_init - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_init - start \n");
 
 	/* Register the device file */
 	rc = misc_register(&snfc_avail_poll_device);
@@ -202,25 +197,19 @@ static int snfc_avail_poll_init(void)
 		return rc;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_init - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_init - end \n");
 
 	return 0;
 }
 
 static void snfc_avail_poll_exit(void)
 {
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_exit - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_exit - start \n");
 
 	/* deregister the device file */
 	misc_deregister(&snfc_avail_poll_device);
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_avail_poll] snfc_avail_poll_exit - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_avail_poll] snfc_avail_poll_exit - end \n");
 }
 
 module_init(snfc_avail_poll_init);

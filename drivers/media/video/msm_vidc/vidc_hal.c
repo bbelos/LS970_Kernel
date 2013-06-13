@@ -15,15 +15,19 @@
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/delay.h>
+#include <mach/ocmem.h>
+
 #include <asm/memory.h>
 #include "vidc_hal.h"
 #include "vidc_hal_io.h"
+#include "msm_vidc_debug.h"
 
 #define FIRMWARE_SIZE			0X00A00000
 #define REG_ADDR_OFFSET_BITMASK	0x000FFFFF
 
 /*Workaround for virtio */
-#define HFI_VIRTIO_FW_BIAS		0x34f00000
+#define HFI_VIRTIO_FW_BIAS		0x0
 
 struct hal_device_data hal_ctxt;
 
@@ -34,13 +38,13 @@ static void hal_virtio_modify_cmd_packet(u8 *packet)
 	u8 i;
 
 	if (!packet) {
-		HAL_MSG_ERROR("Invalid Param: %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Param");
 		return;
 	}
 
 	sys_init = (struct hfi_cmd_sys_session_init_packet *)packet;
 	sess = (struct hal_session *) sys_init->session_id;
-	switch (sys_init->packet) {
+	switch (sys_init->packet_type) {
 	case HFI_CMD_SESSION_EMPTY_BUFFER:
 		if (sess->is_decoder) {
 			struct hfi_cmd_session_empty_buffer_compressed_packet
@@ -73,7 +77,7 @@ static void hal_virtio_modify_cmd_packet(u8 *packet)
 			struct hfi_buffer_info *buff;
 			buff = (struct hfi_buffer_info *) pkt->rg_buffer_info;
 			buff->buffer_addr -= HFI_VIRTIO_FW_BIAS;
-			buff->extradata_addr -= HFI_VIRTIO_FW_BIAS;
+			buff->extra_data_addr -= HFI_VIRTIO_FW_BIAS;
 		} else {
 			for (i = 0; i < pkt->num_buffers; i++)
 				pkt->rg_buffer_info[i] -= HFI_VIRTIO_FW_BIAS;
@@ -84,12 +88,12 @@ static void hal_virtio_modify_cmd_packet(u8 *packet)
 	{
 		struct hfi_cmd_session_release_buffer_packet *pkt =
 			(struct hfi_cmd_session_release_buffer_packet *)packet;
-		if ((pkt->buffer_type == HAL_BUFFER_OUTPUT) ||
-			(pkt->buffer_type == HAL_BUFFER_OUTPUT2)) {
+		if ((pkt->buffer_type == HFI_BUFFER_OUTPUT) ||
+			(pkt->buffer_type == HFI_BUFFER_OUTPUT2)) {
 			struct hfi_buffer_info *buff;
 			buff = (struct hfi_buffer_info *) pkt->rg_buffer_info;
 			buff->buffer_addr -= HFI_VIRTIO_FW_BIAS;
-			buff->extradata_addr -= HFI_VIRTIO_FW_BIAS;
+			buff->extra_data_addr -= HFI_VIRTIO_FW_BIAS;
 		} else {
 			for (i = 0; i < pkt->num_buffers; i++)
 				pkt->rg_buffer_info[i] -= HFI_VIRTIO_FW_BIAS;
@@ -126,26 +130,25 @@ static int write_queue(void *info, u8 *packet, u32 *rx_req_is_set)
 	u32 *write_ptr;
 
 	if (!info || !packet || !rx_req_is_set) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params");
 		return -EINVAL;
 	}
 
 	qinfo =	(struct vidc_iface_q_info *) info;
-	HAL_MSG_LOW("In %s: ", __func__);
 	hal_virtio_modify_cmd_packet(packet);
 
 	queue = (struct hfi_queue_header *) qinfo->q_hdr;
 
 	if (!queue) {
-		HAL_MSG_ERROR("queue not present");
+		dprintk(VIDC_ERR, "queue not present");
 		return -ENOENT;
 	}
 
 	packet_size_in_words = (*(u32 *)packet) >> 2;
-	HAL_MSG_LOW("Packet_size in words: %d", packet_size_in_words);
+	dprintk(VIDC_DBG, "Packet_size in words: %d", packet_size_in_words);
 
 	if (packet_size_in_words == 0) {
-		HAL_MSG_ERROR("Zero packet size");
+		dprintk(VIDC_ERR, "Zero packet size");
 		return -ENODATA;
 	}
 
@@ -154,10 +157,10 @@ static int write_queue(void *info, u8 *packet, u32 *rx_req_is_set)
 	empty_space = (queue->qhdr_write_idx >=  read_idx) ?
 		(queue->qhdr_q_size - (queue->qhdr_write_idx -  read_idx)) :
 		(read_idx - queue->qhdr_write_idx);
-	HAL_MSG_LOW("Empty_space: %d", empty_space);
+	dprintk(VIDC_DBG, "Empty_space: %d", empty_space);
 	if (empty_space <= packet_size_in_words) {
 		queue->qhdr_tx_req =  1;
-		HAL_MSG_ERROR("Insufficient size (%d) to write (%d)",
+		dprintk(VIDC_ERR, "Insufficient size (%d) to write (%d)",
 					  empty_space, packet_size_in_words);
 		return -ENOTEMPTY;
 	}
@@ -167,7 +170,7 @@ static int write_queue(void *info, u8 *packet, u32 *rx_req_is_set)
 	new_write_idx = (queue->qhdr_write_idx + packet_size_in_words);
 	write_ptr = (u32 *)((qinfo->q_array.align_virtual_addr) +
 		(queue->qhdr_write_idx << 2));
-	HAL_MSG_LOW("Write Ptr: %d", (u32) write_ptr);
+	dprintk(VIDC_DBG, "Write Ptr: %d", (u32) write_ptr);
 	if (new_write_idx < queue->qhdr_q_size) {
 		memcpy(write_ptr, packet, packet_size_in_words << 2);
 	} else {
@@ -180,7 +183,7 @@ static int write_queue(void *info, u8 *packet, u32 *rx_req_is_set)
 	}
 	queue->qhdr_write_idx = new_write_idx;
 	*rx_req_is_set = (1 == queue->qhdr_rx_req) ? 1 : 0;
-	HAL_MSG_LOW("Out %s: ", __func__);
+	dprintk(VIDC_DBG, "Out : ");
 	return 0;
 }
 
@@ -190,7 +193,7 @@ static void hal_virtio_modify_msg_packet(u8 *packet)
 	struct hal_session *sess;
 
 	if (!packet) {
-		HAL_MSG_ERROR("Invalid Param: %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Param: ");
 		return;
 	}
 
@@ -245,16 +248,15 @@ static int read_queue(void *info, u8 *packet, u32 *pb_tx_req_is_set)
 	struct vidc_iface_q_info *qinfo;
 
 	if (!info || !packet || !pb_tx_req_is_set) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	}
 
 	qinfo =	(struct vidc_iface_q_info *) info;
-	HAL_MSG_LOW("In %s: ", __func__);
 	queue = (struct hfi_queue_header *) qinfo->q_hdr;
 
 	if (!queue) {
-		HAL_MSG_ERROR("Queue memory is not allocated\n");
+		dprintk(VIDC_ERR, "Queue memory is not allocated\n");
 		return -ENOMEM;
 	}
 
@@ -267,14 +269,14 @@ static int read_queue(void *info, u8 *packet, u32 *pb_tx_req_is_set)
 	read_ptr = (u32 *)((qinfo->q_array.align_virtual_addr) +
 				(queue->qhdr_read_idx << 2));
 	packet_size_in_words = (*read_ptr) >> 2;
-	HAL_MSG_LOW("packet_size_in_words: %d", packet_size_in_words);
+	dprintk(VIDC_DBG, "packet_size_in_words: %d", packet_size_in_words);
 	if (packet_size_in_words == 0) {
-		HAL_MSG_ERROR("Zero packet size");
+		dprintk(VIDC_ERR, "Zero packet size");
 		return -ENODATA;
 	}
 
 	new_read_idx = queue->qhdr_read_idx + packet_size_in_words;
-	HAL_MSG_LOW("Read Ptr: %d", (u32) new_read_idx);
+	dprintk(VIDC_DBG, "Read Ptr: %d", (u32) new_read_idx);
 	if (new_read_idx < queue->qhdr_q_size) {
 		memcpy(packet, read_ptr,
 			packet_size_in_words << 2);
@@ -296,36 +298,47 @@ static int read_queue(void *info, u8 *packet, u32 *pb_tx_req_is_set)
 
 	*pb_tx_req_is_set = (1 == queue->qhdr_tx_req) ? 1 : 0;
 	hal_virtio_modify_msg_packet(packet);
-	HAL_MSG_LOW("Out %s: ", __func__);
+	dprintk(VIDC_DBG, "Out : ");
 	return 0;
 }
 
-static int vidc_hal_alloc(void *mem, void *clnt, u32 size, u32 align, u32 flags)
+static int vidc_hal_alloc(void *mem, void *clnt, u32 size, u32 align, u32 flags,
+		int domain)
 {
 	struct vidc_mem_addr *vmem;
 	struct msm_smem *alloc;
+	int rc = 0;
 
 	if (!mem || !clnt || !size) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	}
 	vmem = (struct vidc_mem_addr *)mem;
-	HAL_MSG_HIGH("start to alloc: size:%d, Flags: %d", size, flags);
+	dprintk(VIDC_WARN, "start to alloc: size:%d, Flags: %d", size, flags);
 
-	alloc  = msm_smem_alloc(clnt, size, align, flags);
-	HAL_MSG_LOW("Alloc done");
+	alloc  = msm_smem_alloc(clnt, size, align, flags, domain, 1, 1);
+	dprintk(VIDC_DBG, "Alloc done");
 	if (!alloc) {
-		HAL_MSG_HIGH("Alloc fail in %s", __func__);
-		return -ENOMEM;
-	} else {
-		HAL_MSG_MEDIUM("vidc_hal_alloc:ptr=%p,size=%d",
-					   alloc->kvaddr, size);
-		vmem->mem_size = alloc->size;
-		vmem->mem_data = alloc;
-		vmem->align_virtual_addr = (u8 *) alloc->kvaddr;
-		vmem->align_device_addr = (u8 *)alloc->device_addr;
+		dprintk(VIDC_ERR, "Alloc failed\n");
+		rc = -ENOMEM;
+		goto fail_smem_alloc;
 	}
-	return 0;
+	rc = msm_smem_clean_invalidate(clnt, alloc);
+	if (rc) {
+		dprintk(VIDC_ERR, "NOTE: Failed to clean caches\n");
+		goto fail_clean_cache;
+	}
+	dprintk(VIDC_DBG, "vidc_hal_alloc:ptr=%p,size=%d",
+			alloc->kvaddr, size);
+	vmem->mem_size = alloc->size;
+	vmem->mem_data = alloc;
+	vmem->align_virtual_addr = (u8 *) alloc->kvaddr;
+	vmem->align_device_addr = (u8 *)alloc->device_addr;
+	return rc;
+fail_clean_cache:
+	msm_smem_free(clnt, alloc);
+fail_smem_alloc:
+	return rc;
 }
 
 static void vidc_hal_free(struct smem_client *clnt, struct msm_smem *mem)
@@ -356,7 +369,7 @@ static void write_register(u8 *base_addr, u32 reg, u32 value, u8 *vaddr)
 	}
 
 	hwiosymaddr = ((u32)base_addr + (hwiosymaddr));
-	HAL_MSG_LOW("Base addr: 0x%x, written to: 0x%x, Value: 0x%x...",
+	dprintk(VIDC_DBG, "Base addr: 0x%x, written to: 0x%x, Value: 0x%x...",
 			(u32)base_addr, hwiosymaddr, value);
 	writel_relaxed(value, hwiosymaddr);
 	wmb();
@@ -376,14 +389,14 @@ static int vidc_hal_iface_cmdq_write(struct hal_device *device, void *pkt)
 	int result = -EPERM;
 
 	if (!device || !pkt) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	}
 
 	spin_lock(&device->write_lock);
 	q_info = &device->iface_queues[VIDC_IFACEQ_CMDQ_IDX];
 	if (!q_info) {
-		HAL_MSG_ERROR("cannot write to shared Q's");
+		dprintk(VIDC_ERR, "cannot write to shared Q's");
 		goto err_q_write;
 	}
 
@@ -394,7 +407,7 @@ static int vidc_hal_iface_cmdq_write(struct hal_device *device, void *pkt)
 				1 << VIDC_CPU_IC_SOFTINT_H2A_SHFT, 0);
 		result = 0;
 	} else {
-		HAL_MSG_ERROR("vidc_hal_iface_cmdq_write:queue_full");
+		dprintk(VIDC_ERR, "vidc_hal_iface_cmdq_write:queue_full");
 	}
 err_q_write:
 	spin_unlock(&device->write_lock);
@@ -408,13 +421,13 @@ int vidc_hal_iface_msgq_read(struct hal_device *device, void *pkt)
 	struct vidc_iface_q_info *q_info;
 
 	if (!pkt) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	}
 	spin_lock(&device->read_lock);
 	if (device->iface_queues[VIDC_IFACEQ_MSGQ_IDX].
 		q_array.align_virtual_addr == 0) {
-		HAL_MSG_ERROR("cannot read from shared MSG Q's");
+		dprintk(VIDC_ERR, "cannot read from shared MSG Q's");
 		rc = -ENODATA;
 		goto read_error;
 	}
@@ -427,7 +440,7 @@ int vidc_hal_iface_msgq_read(struct hal_device *device, void *pkt)
 				1 << VIDC_CPU_IC_SOFTINT_H2A_SHFT, 0);
 		rc = 0;
 	} else {
-		HAL_MSG_ERROR("vidc_hal_iface_msgq_read:queue_empty");
+		dprintk(VIDC_INFO, "vidc_hal_iface_msgq_read:queue_empty");
 		rc = -ENODATA;
 	}
 read_error:
@@ -442,13 +455,13 @@ int vidc_hal_iface_dbgq_read(struct hal_device *device, void *pkt)
 	struct vidc_iface_q_info *q_info;
 
 	if (!pkt) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	}
 	spin_lock(&device->read_lock);
 	if (device->iface_queues[VIDC_IFACEQ_DBGQ_IDX].
 		q_array.align_virtual_addr == 0) {
-		HAL_MSG_ERROR("cannot read from shared DBG Q's");
+		dprintk(VIDC_ERR, "cannot read from shared DBG Q's");
 		rc = -ENODATA;
 		goto dbg_error;
 	}
@@ -460,7 +473,7 @@ int vidc_hal_iface_dbgq_read(struct hal_device *device, void *pkt)
 			1 << VIDC_CPU_IC_SOFTINT_H2A_SHFT, 0);
 		rc = 0;
 	} else {
-		HAL_MSG_MEDIUM("vidc_hal_iface_dbgq_read:queue_empty");
+		dprintk(VIDC_INFO, "vidc_hal_iface_dbgq_read:queue_empty");
 		rc = -ENODATA;
 	}
 dbg_error:
@@ -472,7 +485,7 @@ static void vidc_hal_set_queue_hdr_defaults(struct hfi_queue_header *q_hdr)
 {
 	q_hdr->qhdr_status = 0x1;
 	q_hdr->qhdr_type = VIDC_IFACEQ_DFLT_QHDR;
-	q_hdr->qhdr_q_size = VIDC_IFACEQ_QUEUE_SIZE;
+	q_hdr->qhdr_q_size = VIDC_IFACEQ_QUEUE_SIZE / 4;
 	q_hdr->qhdr_pkt_size = 0;
 	q_hdr->qhdr_rx_wm = 0x1;
 	q_hdr->qhdr_tx_wm = 0x1;
@@ -503,7 +516,7 @@ static void vidc_hal_interface_queues_release(struct hal_device *device)
 	device->hal_client = NULL;
 }
 
-static int vidc_hal_interface_queues_init(struct hal_device *dev)
+static int vidc_hal_interface_queues_init(struct hal_device *dev, int domain)
 {
 	struct hfi_queue_table_header *q_tbl_hdr;
 	struct hfi_queue_header *q_hdr;
@@ -513,9 +526,9 @@ static int vidc_hal_interface_queues_init(struct hal_device *dev)
 
 	rc = vidc_hal_alloc((void *) &dev->iface_q_table,
 					dev->hal_client,
-			VIDC_IFACEQ_TABLE_SIZE, 1, 0);
+			VIDC_IFACEQ_TABLE_SIZE, 1, SMEM_UNCACHED, domain);
 	if (rc) {
-		HAL_MSG_ERROR("%s:iface_q_table_alloc_fail", __func__);
+		dprintk(VIDC_ERR, "iface_q_table_alloc_fail");
 		return -ENOMEM;
 	}
 	q_tbl_hdr = (struct hfi_queue_table_header *)
@@ -533,10 +546,9 @@ static int vidc_hal_interface_queues_init(struct hal_device *dev)
 		iface_q = &dev->iface_queues[i];
 		rc = vidc_hal_alloc((void *) &iface_q->q_array,
 				dev->hal_client, VIDC_IFACEQ_QUEUE_SIZE,
-				1, 0);
+				1, SMEM_UNCACHED, domain);
 		if (rc) {
-			HAL_MSG_ERROR("%s:iface_q_table_alloc[%d]_fail",
-						__func__, i);
+			dprintk(VIDC_ERR, "iface_q_table_alloc[%d]_fail", i);
 			vidc_hal_interface_queues_release(dev);
 			return -ENOMEM;
 		} else {
@@ -577,22 +589,56 @@ static int vidc_hal_interface_queues_init(struct hal_device *dev)
 static int vidc_hal_core_start_cpu(struct hal_device *device)
 {
 	u32 ctrl_status = 0, count = 0, rc = 0;
+	int max_tries = 100;
 	write_register(device->hal_data->register_base_addr,
 			VIDC_WRAPPER_INTR_MASK, 0, 0);
 	write_register(device->hal_data->register_base_addr,
 			VIDC_CPU_CS_SCIACMDARG3, 1, 0);
-	while (!ctrl_status && count < 25) {
+	while (!ctrl_status && count < max_tries) {
 		ctrl_status = read_register(
 		device->hal_data->register_base_addr,
 		VIDC_CPU_CS_SCIACMDARG0);
+		usleep_range(500, 1000);
 		count++;
 	}
-	if (count >= 25)
+	if (count >= max_tries)
 		rc = -ETIME;
 	return rc;
 }
 
-int vidc_hal_core_init(void *device)
+static void set_vbif_registers(struct hal_device *device)
+{
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_OUT_AXI_AOOO_EN, 0x00000FFF, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_OUT_AXI_AOOO, 0x0FFF0FFF, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VENUS_VBIF_CLK_ON, 1, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_RD_LIM_CONF0, 0x10101001, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_RD_LIM_CONF1, 0x10101010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_RD_LIM_CONF2, 0x10101010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_RD_LIM_CONF3, 0x00000010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_WR_LIM_CONF0, 0x1010100f, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_WR_LIM_CONF1, 0x10101010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_WR_LIM_CONF2, 0x10101010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_IN_WR_LIM_CONF3, 0x00000010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_OUT_RD_LIM_CONF0, 0x00001010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_OUT_WR_LIM_CONF0, 0x00001010, 0);
+	write_register(device->hal_data->register_base_addr,
+			VIDC_VBIF_ARB_CTL, 0x00000030, 0);
+}
+
+int vidc_hal_core_init(void *device, int domain)
 {
 	struct hfi_cmd_sys_init_packet pkt;
 	int rc = 0;
@@ -601,7 +647,7 @@ int vidc_hal_core_init(void *device)
 	if (device) {
 		dev = device;
 	} else {
-		HAL_MSG_ERROR("%s:invalid device", __func__);
+		dprintk(VIDC_ERR, "Invalid device");
 		return -ENODEV;
 	}
 	enable_irq(dev->hal_data->irq);
@@ -609,38 +655,43 @@ int vidc_hal_core_init(void *device)
 	spin_lock_init(&dev->read_lock);
 	spin_lock_init(&dev->write_lock);
 
+	/*Disable Dynamic clock gating for Venus VBIF*/
+	write_register(dev->hal_data->register_base_addr,
+				   VIDC_VENUS_VBIF_CLK_ON, 1, 0);
+	set_vbif_registers(dev);
 	if (!dev->hal_client) {
 		dev->hal_client = msm_smem_new_client(SMEM_ION);
 		if (dev->hal_client == NULL) {
-			HAL_MSG_ERROR("Failed to alloc ION_Client");
+			dprintk(VIDC_ERR, "Failed to alloc ION_Client");
 			rc = -ENODEV;
 			goto err_no_mem;
 		}
 
-		HAL_MSG_ERROR("Device_Virt_Address : 0x%x,"
+		dprintk(VIDC_DBG, "Device_Virt_Address : 0x%x,"
 		"Register_Virt_Addr: 0x%x",
-		(u32) dev->hal_data->device_base_addr,
+		dev->hal_data->device_base_addr,
 		(u32) dev->hal_data->register_base_addr);
 
-		rc = vidc_hal_interface_queues_init(dev);
+		rc = vidc_hal_interface_queues_init(dev, domain);
 		if (rc) {
-			HAL_MSG_ERROR("failed to init queues");
+			dprintk(VIDC_ERR, "failed to init queues");
 			rc = -ENOMEM;
 			goto err_no_mem;
 		}
 	} else {
-		HAL_MSG_ERROR("hal_client exists");
+		dprintk(VIDC_ERR, "hal_client exists");
 		rc = -EEXIST;
 		goto err_no_mem;
 	}
 	rc = vidc_hal_core_start_cpu(dev);
 	if (rc) {
-		HAL_MSG_ERROR("Failed to start core");
+		dprintk(VIDC_ERR, "Failed to start core");
 		rc = -ENODEV;
 		goto err_no_dev;
 	}
 	pkt.size = sizeof(struct hfi_cmd_sys_init_packet);
-	pkt.packet = HFI_CMD_SYS_INIT;
+	pkt.packet_type = HFI_CMD_SYS_INIT;
+	pkt.arch_type = HFI_ARCH_OX_OFFSET;
 	if (vidc_hal_iface_cmdq_write(dev, &pkt)) {
 		rc = -ENOTEMPTY;
 		goto err_write_fail;
@@ -659,14 +710,14 @@ int vidc_hal_core_release(void *device)
 	if (device) {
 		dev = device;
 	} else {
-		HAL_MSG_ERROR("%s:invalid device", __func__);
+		dprintk(VIDC_ERR, "invalid device");
 		return -ENODEV;
 	}
 	write_register(dev->hal_data->register_base_addr,
 		VIDC_CPU_CS_SCIACMDARG3, 0, 0);
 	disable_irq_nosync(dev->hal_data->irq);
 	vidc_hal_interface_queues_release(dev);
-	HAL_MSG_INFO("\nHAL exited\n");
+	dprintk(VIDC_INFO, "HAL exited\n");
 	return 0;
 }
 
@@ -679,7 +730,7 @@ int vidc_hal_core_pc_prep(void *device)
 	if (device) {
 		dev = device;
 	} else {
-		HAL_MSG_ERROR("%s:invalid device", __func__);
+		dprintk(VIDC_ERR, "invalid device");
 		return -ENODEV;
 	}
 	pkt.size = sizeof(struct hfi_cmd_sys_pc_prep_packet);
@@ -703,11 +754,11 @@ static void vidc_hal_core_clear_interrupt(struct hal_device *device)
 	if ((intr_status & VIDC_WRAPPER_INTR_STATUS_A2H_BMSK) ||
 		(intr_status & VIDC_WRAPPER_INTR_STATUS_A2HWD_BMSK)) {
 		device->intr_status |= intr_status;
-		HAL_MSG_ERROR("INTERRUPT for device: 0x%x: "
+		dprintk(VIDC_DBG, "INTERRUPT for device: 0x%x: "
 			"times: %d interrupt_status: %d",
 			(u32) device, ++device->reg_count, intr_status);
 	} else {
-		HAL_MSG_ERROR("SPURIOUS_INTR for device: 0x%x: "
+		dprintk(VIDC_WARN, "SPURIOUS_INTR for device: 0x%x: "
 			"times: %d interrupt_status: %d",
 			(u32) device, ++device->spur_count, intr_status);
 	}
@@ -715,7 +766,7 @@ static void vidc_hal_core_clear_interrupt(struct hal_device *device)
 			VIDC_CPU_CS_A2HSOFTINTCLR, 1, 0);
 	write_register(device->hal_data->register_base_addr,
 			VIDC_WRAPPER_INTR_CLEAR, intr_status, 0);
-	HAL_MSG_ERROR("Cleared WRAPPER/A2H interrupt");
+	dprintk(VIDC_DBG, "Cleared WRAPPER/A2H interrupt");
 }
 
 int vidc_hal_core_set_resource(void *device,
@@ -727,7 +778,7 @@ int vidc_hal_core_set_resource(void *device,
 	struct hal_device *dev;
 
 	if (!device || !resource_hdr || !resource_value) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "set_res: Invalid Params");
 		return -EINVAL;
 	} else {
 		dev = device;
@@ -742,23 +793,23 @@ int vidc_hal_core_set_resource(void *device,
 	switch (resource_hdr->resource_id) {
 	case VIDC_RESOURCE_OCMEM:
 	{
-		struct hfi_resource_ocmem_type *hfioc_mem =
-			(struct hfi_resource_ocmem_type *)
+		struct hfi_resource_ocmem *hfioc_mem =
+			(struct hfi_resource_ocmem *)
 			&pkt->rg_resource_data[0];
-		struct vidc_mem_addr *vidc_oc_mem =
-			(struct vidc_mem_addr *) resource_value;
+		struct ocmem_buf *ocmem =
+			(struct ocmem_buf *) resource_value;
 
 		pkt->resource_type = HFI_RESOURCE_OCMEM;
-		hfioc_mem->size = (u32) vidc_oc_mem->mem_size;
-		hfioc_mem->mem = (u8 *) vidc_oc_mem->align_device_addr;
-		pkt->size += sizeof(struct hfi_resource_ocmem_type);
+		hfioc_mem->size = (u32) ocmem->len;
+		hfioc_mem->mem = (u8 *) ocmem->addr;
+		pkt->size += sizeof(struct hfi_resource_ocmem);
 		if (vidc_hal_iface_cmdq_write(dev, pkt))
 			rc = -ENOTEMPTY;
 		break;
 	}
 	default:
-		HAL_MSG_INFO("In %s called for resource %d",
-					 __func__, resource_hdr->resource_id);
+		dprintk(VIDC_INFO, "Invalid res_id in set_res %d",
+						resource_hdr->resource_id);
 		break;
 	}
 	return rc;
@@ -772,7 +823,7 @@ int vidc_hal_core_release_resource(void *device,
 	struct hal_device *dev;
 
 	if (!device || !resource_hdr) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Inv-Params in rel_res");
 		return -EINVAL;
 	} else {
 		dev = device;
@@ -797,7 +848,7 @@ int vidc_hal_core_ping(void *device)
 	if (device) {
 		dev = device;
 	} else {
-		HAL_MSG_ERROR("%s:invalid device", __func__);
+		dprintk(VIDC_ERR, "invalid device");
 		return -ENODEV;
 	}
 	pkt.size = sizeof(struct hfi_cmd_sys_ping_packet);
@@ -807,7 +858,42 @@ int vidc_hal_core_ping(void *device)
 		rc = -ENOTEMPTY;
 	return rc;
 }
-
+static u32 get_hfi_buffer(int hal_buffer)
+{
+	u32 buffer;
+	switch (hal_buffer) {
+	case HAL_BUFFER_INPUT:
+		buffer = HFI_BUFFER_INPUT;
+		break;
+	case HAL_BUFFER_OUTPUT:
+		buffer = HFI_BUFFER_OUTPUT;
+		break;
+	case HAL_BUFFER_OUTPUT2:
+		buffer = HFI_BUFFER_OUTPUT;
+		break;
+	case HAL_BUFFER_EXTRADATA_INPUT:
+		buffer = HFI_BUFFER_EXTRADATA_INPUT;
+		break;
+	case HAL_BUFFER_EXTRADATA_OUTPUT:
+		buffer = HFI_BUFFER_EXTRADATA_OUTPUT;
+		break;
+	case HAL_BUFFER_EXTRADATA_OUTPUT2:
+		buffer = HFI_BUFFER_EXTRADATA_OUTPUT2;
+		break;
+	case HAL_BUFFER_INTERNAL_SCRATCH:
+		buffer = HFI_BUFFER_INTERNAL_SCRATCH;
+		break;
+	case HAL_BUFFER_INTERNAL_PERSIST:
+		buffer = HFI_BUFFER_INTERNAL_PERSIST;
+		break;
+	default:
+		dprintk(VIDC_ERR, "Invalid buffer :0x%x\n",
+				hal_buffer);
+		buffer = 0;
+		break;
+	}
+	return buffer;
+}
 int vidc_hal_session_set_property(void *sess,
 	enum hal_property ptype, void *pdata)
 {
@@ -817,15 +903,14 @@ int vidc_hal_session_set_property(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !pdata) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params");
 		return -EINVAL;
 	} else {
 		session = sess;
 	}
 
-	HAL_MSG_INFO("IN func: %s, with property id: %d", __func__, ptype);
-	pkt->size = sizeof(struct hfi_cmd_session_set_property_packet)
-		- sizeof(u32);
+	dprintk(VIDC_INFO, "in set_prop,with prop id: 0x%x", ptype);
+	pkt->size = sizeof(struct hfi_cmd_session_set_property_packet);
 	pkt->packet_type = HFI_CMD_SESSION_SET_PROPERTY;
 	pkt->session_id = (u32) session;
 	pkt->num_properties = 1;
@@ -833,24 +918,37 @@ int vidc_hal_session_set_property(void *sess,
 	switch (ptype) {
 	case HAL_CONFIG_FRAME_RATE:
 	{
-		struct hfi_frame_rate *hfi_fps;
+		struct hfi_frame_rate *hfi;
+		u32 buffer;
+		struct hal_frame_rate *prop =
+			(struct hal_frame_rate *) pdata;
 		pkt->rg_property_data[0] = HFI_PROPERTY_CONFIG_FRAME_RATE;
-		hfi_fps = (struct hfi_frame_rate *) &pkt->rg_property_data[1];
-		memcpy(hfi_fps, (struct hfi_frame_rate *)
-			pdata, sizeof(struct hfi_frame_rate));
+		hfi = (struct hfi_frame_rate *) &pkt->rg_property_data[1];
+		buffer = get_hfi_buffer(prop->buffer_type);
+		if (buffer)
+			hfi->buffer_type = buffer;
+		else
+			return -EINVAL;
+		hfi->frame_rate = prop->frame_rate;
 		pkt->size += sizeof(u32) + sizeof(struct hfi_frame_rate);
 		break;
 	}
 	case HAL_PARAM_UNCOMPRESSED_FORMAT_SELECT:
 	{
-		struct hfi_uncompressed_format_select *hfi_buf_fmt;
+		u32 buffer;
+		struct hfi_uncompressed_format_select *hfi;
+		struct hal_uncompressed_format_select *prop =
+			(struct hal_uncompressed_format_select *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_UNCOMPRESSED_FORMAT_SELECT;
-		hfi_buf_fmt =
-		(struct hfi_uncompressed_format_select *)
-		&pkt->rg_property_data[1];
-		memcpy(hfi_buf_fmt, (struct hfi_uncompressed_format_select *)
-			pdata, sizeof(struct hfi_uncompressed_format_select));
+		hfi = (struct hfi_uncompressed_format_select *)
+			&pkt->rg_property_data[1];
+		buffer = get_hfi_buffer(prop->buffer_type);
+		if (buffer)
+			hfi->buffer_type = buffer;
+		else
+			return -EINVAL;
+		hfi->format = prop->format;
 		pkt->size += sizeof(u32) + sizeof(struct
 			hfi_uncompressed_format_select);
 		break;
@@ -863,11 +961,18 @@ int vidc_hal_session_set_property(void *sess,
 		break;
 	case HAL_PARAM_FRAME_SIZE:
 	{
-		struct hfi_frame_size *hfi_rect;
+		u32 buffer;
+		struct hfi_frame_size *hfi;
+		struct hal_frame_size *prop = (struct hal_frame_size *) pdata;
 		pkt->rg_property_data[0] = HFI_PROPERTY_PARAM_FRAME_SIZE;
-		hfi_rect = (struct hfi_frame_size *) &pkt->rg_property_data[1];
-		memcpy(hfi_rect, (struct hfi_frame_size *) pdata,
-			sizeof(struct hfi_frame_size));
+		hfi = (struct hfi_frame_size *) &pkt->rg_property_data[1];
+		buffer = get_hfi_buffer(prop->buffer_type);
+		if (buffer)
+			hfi->buffer_type = buffer;
+		else
+			return -EINVAL;
+		hfi->height = prop->height;
+		hfi->width = prop->width;
 		pkt->size += sizeof(u32) + sizeof(struct hfi_frame_size);
 		break;
 	}
@@ -876,38 +981,85 @@ int vidc_hal_session_set_property(void *sess,
 		struct hfi_enable *hfi;
 		pkt->rg_property_data[0] = HFI_PROPERTY_CONFIG_REALTIME;
 		hfi = (struct hfi_enable *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_enable *) pdata,
-				sizeof(struct hfi_enable));
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
+		hfi->enable = ((struct hfi_enable *) pdata)->enable;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_BUFFER_COUNT_ACTUAL:
 	{
+		u32 buffer;
 		struct hfi_buffer_count_actual *hfi;
+		struct hal_buffer_count_actual *prop =
+			(struct hal_buffer_count_actual *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL;
 		hfi = (struct hfi_buffer_count_actual *)
 				&pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_buffer_count_actual *) pdata,
-			sizeof(struct hfi_buffer_count_actual));
+		hfi->buffer_count_actual = prop->buffer_count_actual;
+		buffer = get_hfi_buffer(prop->buffer_type);
+		if (buffer)
+			hfi->buffer_type = buffer;
+		else
+			return -EINVAL;
 		pkt->size += sizeof(u32) + sizeof(struct
 					hfi_buffer_count_actual);
 		break;
 	}
 	case HAL_PARAM_NAL_STREAM_FORMAT_SELECT:
 	{
+		struct hal_nal_stream_format_supported *prop =
+			(struct hal_nal_stream_format_supported *)pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_NAL_STREAM_FORMAT_SELECT;
-		pkt->rg_property_data[1] = (enum HFI_NAL_STREAM_FORMAT)pdata;
-		pkt->size += sizeof(u32) + sizeof(enum HFI_NAL_STREAM_FORMAT);
+		dprintk(VIDC_DBG, "data is :%d",
+				prop->nal_stream_format_supported);
+		switch (prop->nal_stream_format_supported) {
+		case HAL_NAL_FORMAT_STARTCODES:
+			pkt->rg_property_data[1] =
+				HFI_NAL_FORMAT_STARTCODES;
+			break;
+		case HAL_NAL_FORMAT_ONE_NAL_PER_BUFFER:
+			pkt->rg_property_data[1] =
+				HFI_NAL_FORMAT_ONE_NAL_PER_BUFFER;
+			break;
+		case HAL_NAL_FORMAT_ONE_BYTE_LENGTH:
+			pkt->rg_property_data[1] =
+				HFI_NAL_FORMAT_ONE_BYTE_LENGTH;
+			break;
+		case HAL_NAL_FORMAT_TWO_BYTE_LENGTH:
+			pkt->rg_property_data[1] =
+				HFI_NAL_FORMAT_TWO_BYTE_LENGTH;
+			break;
+		case HAL_NAL_FORMAT_FOUR_BYTE_LENGTH:
+			pkt->rg_property_data[1] =
+				HFI_NAL_FORMAT_FOUR_BYTE_LENGTH;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid nal format: 0x%x",
+				  prop->nal_stream_format_supported);
+			break;
+		}
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VDEC_OUTPUT_ORDER:
 	{
+		int *data = (int *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VDEC_OUTPUT_ORDER;
-		pkt->rg_property_data[1] = (enum HFI_OUTPUT_ORDER)pdata;
-		pkt->size += sizeof(u32) + sizeof(enum HFI_OUTPUT_ORDER);
+		switch (*data) {
+		case HAL_OUTPUT_ORDER_DECODE:
+			pkt->rg_property_data[1] = HFI_OUTPUT_ORDER_DECODE;
+			break;
+		case HAL_OUTPUT_ORDER_DISPLAY:
+			pkt->rg_property_data[1] = HFI_OUTPUT_ORDER_DISPLAY;
+			break;
+		default:
+			dprintk(VIDC_ERR, "invalid output order: 0x%x",
+						  *data);
+			break;
+		}
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VDEC_PICTURE_TYPE_DECODE:
@@ -917,7 +1069,7 @@ int vidc_hal_session_set_property(void *sess,
 			HFI_PROPERTY_PARAM_VDEC_PICTURE_TYPE_DECODE;
 		hfi = (struct hfi_enable_picture *) &pkt->rg_property_data[1];
 		hfi->picture_type = (u32) pdata;
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable_picture);
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VDEC_OUTPUT2_KEEP_ASPECT_RATIO:
@@ -926,9 +1078,8 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VDEC_OUTPUT2_KEEP_ASPECT_RATIO;
 		hfi = (struct hfi_enable *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_enable *) pdata,
-				sizeof(struct hfi_enable));
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
+		hfi->enable = ((struct hfi_enable *) pdata)->enable;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_CONFIG_VDEC_POST_LOOP_DEBLOCKER:
@@ -937,41 +1088,64 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_CONFIG_VDEC_POST_LOOP_DEBLOCKER;
 		hfi = (struct hfi_enable *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_enable *) pdata,
-				sizeof(struct hfi_enable));
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
+		hfi->enable = ((struct hfi_enable *) pdata)->enable;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VDEC_MULTI_STREAM:
 	{
+		u32 buffer;
 		struct hfi_multi_stream *hfi;
+		struct hal_multi_stream *prop =
+			(struct hal_multi_stream *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VDEC_MULTI_STREAM;
 		hfi = (struct hfi_multi_stream *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_multi_stream *)pdata,
-				sizeof(struct hfi_multi_stream));
+		buffer = get_hfi_buffer(prop->buffer_type);
+		if (buffer)
+			hfi->buffer_type = buffer;
+		else
+			return -EINVAL;
+		hfi->enable = prop->enable;
+		hfi->width = prop->width;
+		hfi->height = prop->height;
 		pkt->size += sizeof(u32) + sizeof(struct hfi_multi_stream);
 		break;
 	}
 	case HAL_PARAM_VDEC_DISPLAY_PICTURE_BUFFER_COUNT:
 	{
-		struct hfi_display_picture_buffer_count *hfi_disp_buf;
+		struct hfi_display_picture_buffer_count *hfi;
+		struct hal_display_picture_buffer_count *prop =
+			(struct hal_display_picture_buffer_count *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VDEC_DISPLAY_PICTURE_BUFFER_COUNT;
-		hfi_disp_buf = (struct hfi_display_picture_buffer_count *)
+		hfi = (struct hfi_display_picture_buffer_count *)
 			&pkt->rg_property_data[1];
-		memcpy(hfi_disp_buf,
-			(struct hfi_display_picture_buffer_count *)pdata,
-			sizeof(struct hfi_display_picture_buffer_count));
+		hfi->count = prop->count;
+		hfi->enable = prop->enable;
 		pkt->size += sizeof(u32) +
 			sizeof(struct hfi_display_picture_buffer_count);
 		break;
 	}
 	case HAL_PARAM_DIVX_FORMAT:
 	{
+		int *data = pdata;
 		pkt->rg_property_data[0] = HFI_PROPERTY_PARAM_DIVX_FORMAT;
-		pkt->rg_property_data[1] = (enum HFI_DIVX_FORMAT)pdata;
-		pkt->size += sizeof(u32) + sizeof(enum HFI_DIVX_FORMAT);
+		switch (*data) {
+		case HAL_DIVX_FORMAT_4:
+			pkt->rg_property_data[1] = HFI_DIVX_FORMAT_4;
+			break;
+		case HAL_DIVX_FORMAT_5:
+			pkt->rg_property_data[1] = HFI_DIVX_FORMAT_5;
+			break;
+		case HAL_DIVX_FORMAT_6:
+			pkt->rg_property_data[1] = HFI_DIVX_FORMAT_6;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid divx format: 0x%x", *data);
+			break;
+		}
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_CONFIG_VDEC_MB_ERROR_MAP_REPORTING:
@@ -980,25 +1154,24 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_CONFIG_VDEC_MB_ERROR_MAP_REPORTING;
 		hfi = (struct hfi_enable *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_enable *) pdata,
-				sizeof(struct hfi_enable));
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
+		hfi->enable = ((struct hfi_enable *) pdata)->enable;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VDEC_CONTINUE_DATA_TRANSFER:
 	{
-		struct hfi_enable *enable;
+		struct hfi_enable *hfi;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VDEC_CONTINUE_DATA_TRANSFER;
-		enable = (struct hfi_enable *) &pkt->rg_property_data[1];
-		memcpy(enable, (struct hfi_enable *) pdata,
-				sizeof(struct hfi_enable));
-		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
+		hfi = (struct hfi_enable *) &pkt->rg_property_data[1];
+		hfi->enable = ((struct hfi_enable *) pdata)->enable;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_CONFIG_VENC_REQUEST_IFRAME:
 		pkt->rg_property_data[0] =
-			HFI_PROPERTY_CONFIG_VENC_REQUEST_IFRAME;
+			HFI_PROPERTY_CONFIG_VENC_REQUEST_SYNC_FRAME;
+		pkt->size += sizeof(u32);
 		break;
 	case HAL_PARAM_VENC_MPEG4_SHORT_HEADER:
 		break;
@@ -1010,41 +1183,98 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_CONFIG_VENC_TARGET_BITRATE;
 		hfi = (struct hfi_bitrate *) &pkt->rg_property_data[1];
-		hfi->bit_rate = ((struct hfi_bitrate *)pdata)->bit_rate;
-		pkt->size += sizeof(u32) + sizeof(struct hfi_bitrate);
+		hfi->bit_rate = ((struct hal_bitrate *)pdata)->bit_rate;
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_PROFILE_LEVEL_CURRENT:
 	{
-		struct hfi_profile_level *hfi_profile_level;
+		struct hfi_profile_level *hfi;
+		struct hal_profile_level *prop =
+			(struct hal_profile_level *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_PROFILE_LEVEL_CURRENT;
-		hfi_profile_level = (struct hfi_profile_level *)
-		&pkt->rg_property_data[1];
-		memcpy(hfi_profile_level, (struct hfi_profile_level *) pdata,
-			sizeof(struct hfi_profile_level));
+		hfi = (struct hfi_profile_level *)
+			&pkt->rg_property_data[1];
+		hfi->level = (u32) prop->level;
+		hfi->profile = prop->profile;
+		if (!hfi->profile)
+			hfi->profile = HFI_H264_PROFILE_HIGH;
+		if (!hfi->level)
+			hfi->level = 1;
 		pkt->size += sizeof(u32) + sizeof(struct hfi_profile_level);
 		break;
 	}
 	case HAL_PARAM_VENC_H264_ENTROPY_CONTROL:
 	{
 		struct hfi_h264_entropy_control *hfi;
+		struct hal_h264_entropy_control *prop =
+			(struct hal_h264_entropy_control *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_H264_ENTROPY_CONTROL;
 		hfi = (struct hfi_h264_entropy_control *)
 			&pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_h264_entropy_control *) pdata,
-				sizeof(struct hfi_h264_entropy_control));
+		switch (prop->entropy_mode) {
+		case HAL_H264_ENTROPY_CAVLC:
+			hfi->cabac_model = HFI_H264_ENTROPY_CAVLC;
+			break;
+		case HAL_H264_ENTROPY_CABAC:
+			hfi->cabac_model = HFI_H264_ENTROPY_CABAC;
+			switch (prop->cabac_model) {
+			case HAL_H264_CABAC_MODEL_0:
+				hfi->cabac_model = HFI_H264_CABAC_MODEL_0;
+				break;
+			case HAL_H264_CABAC_MODEL_1:
+				hfi->cabac_model = HFI_H264_CABAC_MODEL_1;
+				break;
+			case HAL_H264_CABAC_MODEL_2:
+				hfi->cabac_model = HFI_H264_CABAC_MODEL_2;
+				break;
+			default:
+				dprintk(VIDC_ERR,
+					"Invalid cabac model 0x%x",
+					prop->entropy_mode);
+				break;
+			}
+		break;
+		default:
+			dprintk(VIDC_ERR,
+				"Invalid entropy selected: 0x%x",
+				prop->cabac_model);
+			break;
+		}
 		pkt->size += sizeof(u32) + sizeof(
 			struct hfi_h264_entropy_control);
 		break;
 	}
 	case HAL_PARAM_VENC_RATE_CONTROL:
 	{
+		u32 *rc;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_RATE_CONTROL;
-		pkt->rg_property_data[1] = (enum HFI_RATE_CONTROL)pdata;
-		pkt->size += sizeof(u32) + sizeof(enum HFI_RATE_CONTROL);
+		rc = (u32 *)pdata;
+		switch ((enum hal_rate_control) *rc) {
+		case HAL_RATE_CONTROL_OFF:
+		pkt->rg_property_data[1] = HFI_RATE_CONTROL_OFF;
+			break;
+		case HAL_RATE_CONTROL_CBR_CFR:
+		pkt->rg_property_data[1] = HFI_RATE_CONTROL_CBR_CFR;
+			break;
+		case HAL_RATE_CONTROL_CBR_VFR:
+		pkt->rg_property_data[1] = HFI_RATE_CONTROL_CBR_VFR;
+			break;
+		case HAL_RATE_CONTROL_VBR_CFR:
+		pkt->rg_property_data[1] = HFI_RATE_CONTROL_VBR_CFR;
+			break;
+		case HAL_RATE_CONTROL_VBR_VFR:
+		pkt->rg_property_data[1] = HFI_RATE_CONTROL_VBR_VFR;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid Rate control setting: 0x%x",
+						  (int) pdata);
+			break;
+		}
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VENC_MPEG4_TIME_RESOLUTION:
@@ -1057,8 +1287,7 @@ int vidc_hal_session_set_property(void *sess,
 		hfi->time_increment_resolution =
 			((struct hal_mpeg4_time_resolution *)pdata)->
 					time_increment_resolution;
-		pkt->size += sizeof(u32) + sizeof(
-			struct hfi_mpeg4_time_resolution);
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VENC_MPEG4_HEADER_EXTENSION:
@@ -1067,35 +1296,38 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_MPEG4_HEADER_EXTENSION;
 		hfi = (struct hfi_mpeg4_header_extension *)
-		&pkt->rg_property_data[1];
+			&pkt->rg_property_data[1];
 		hfi->header_extension = (u32) pdata;
-		pkt->size += sizeof(u32) +
-			sizeof(struct hfi_mpeg4_header_extension);
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_PARAM_VENC_H264_DEBLOCK_CONTROL:
 	{
 		struct hfi_h264_db_control *hfi;
+		struct hal_h264_db_control *prop =
+			(struct hal_h264_db_control *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_H264_DEBLOCK_CONTROL;
 		hfi = (struct hfi_h264_db_control *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_h264_db_control *) pdata,
-				sizeof(struct hfi_h264_db_control));
+		switch (prop->mode) {
+		case HAL_H264_DB_MODE_DISABLE:
+			hfi->mode = HFI_H264_DB_MODE_DISABLE;
+			break;
+		case HAL_H264_DB_MODE_SKIP_SLICE_BOUNDARY:
+			hfi->mode = HFI_H264_DB_MODE_SKIP_SLICE_BOUNDARY;
+			break;
+		case HAL_H264_DB_MODE_ALL_BOUNDARY:
+			hfi->mode = HFI_H264_DB_MODE_ALL_BOUNDARY;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid deblocking mode: 0x%x",
+						  prop->mode);
+			break;
+		}
+		hfi->slice_alpha_offset = prop->slice_alpha_offset;
+		hfi->slice_beta_offset = prop->slice_beta_offset;
 		pkt->size += sizeof(u32) +
 			sizeof(struct hfi_h264_db_control);
-		break;
-	}
-	case HAL_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF:
-	{
-		struct hfi_temporal_spatial_tradeoff *hfi;
-		pkt->rg_property_data[0] =
-			HFI_PROPERTY_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF;
-		hfi = (struct hfi_temporal_spatial_tradeoff *)
-		&pkt->rg_property_data[1];
-		hfi->ts_factor = ((struct hfi_temporal_spatial_tradeoff *)
-					pdata)->ts_factor;
-		pkt->size += sizeof(u32) +
-			sizeof(struct hfi_temporal_spatial_tradeoff);
 		break;
 	}
 	case HAL_PARAM_VENC_SESSION_QP:
@@ -1126,7 +1358,7 @@ int vidc_hal_session_set_property(void *sess,
 		pkt->rg_property_data[0] = HFI_PROPERTY_CONFIG_VENC_IDR_PERIOD;
 		hfi = (struct hfi_idr_period *) &pkt->rg_property_data[1];
 		hfi->idr_period = ((struct hfi_idr_period *) pdata)->idr_period;
-		pkt->size += sizeof(u32) + sizeof(struct hfi_idr_period);
+		pkt->size += sizeof(u32) * 2;
 		break;
 	}
 	case HAL_CONFIG_VPE_OPERATIONS:
@@ -1134,25 +1366,67 @@ int vidc_hal_session_set_property(void *sess,
 	case HAL_PARAM_VENC_INTRA_REFRESH:
 	{
 		struct hfi_intra_refresh *hfi;
+		struct hal_intra_refresh *prop =
+			(struct hal_intra_refresh *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_INTRA_REFRESH;
 		hfi = (struct hfi_intra_refresh *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_intra_refresh *) pdata,
-				sizeof(struct hfi_intra_refresh));
+		switch (prop->mode) {
+		case HAL_INTRA_REFRESH_NONE:
+			hfi->mode = HFI_INTRA_REFRESH_NONE;
+			break;
+		case HAL_INTRA_REFRESH_ADAPTIVE:
+			hfi->mode = HFI_INTRA_REFRESH_ADAPTIVE;
+			break;
+		case HAL_INTRA_REFRESH_CYCLIC:
+			hfi->mode = HFI_INTRA_REFRESH_CYCLIC;
+			break;
+		case HAL_INTRA_REFRESH_CYCLIC_ADAPTIVE:
+			hfi->mode = HFI_INTRA_REFRESH_CYCLIC_ADAPTIVE;
+			break;
+		case HAL_INTRA_REFRESH_RANDOM:
+			hfi->mode = HFI_INTRA_REFRESH_RANDOM;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid intra refresh setting: 0x%x",
+				prop->mode);
+			break;
+		}
+		hfi->air_mbs = prop->air_mbs;
+		hfi->air_ref = prop->air_ref;
+		hfi->cir_mbs = prop->cir_mbs;
 		pkt->size += sizeof(u32) + sizeof(struct hfi_intra_refresh);
 		break;
 	}
 	case HAL_PARAM_VENC_MULTI_SLICE_CONTROL:
 	{
 		struct hfi_multi_slice_control *hfi;
+		struct hal_multi_slice_control *prop =
+			(struct hal_multi_slice_control *) pdata;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_MULTI_SLICE_CONTROL;
 		hfi = (struct hfi_multi_slice_control *)
-				&pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_multi_slice_control *) pdata,
-				sizeof(struct hfi_multi_slice_control));
+			&pkt->rg_property_data[1];
+		switch (prop->multi_slice) {
+		case HAL_MULTI_SLICE_OFF:
+			hfi->multi_slice = HFI_MULTI_SLICE_OFF;
+			break;
+		case HAL_MULTI_SLICE_GOB:
+			hfi->multi_slice = HFI_MULTI_SLICE_GOB;
+			break;
+		case HAL_MULTI_SLICE_BY_MB_COUNT:
+			hfi->multi_slice = HFI_MULTI_SLICE_BY_MB_COUNT;
+			break;
+		case HAL_MULTI_SLICE_BY_BYTE_COUNT:
+			hfi->multi_slice = HFI_MULTI_SLICE_BY_BYTE_COUNT;
+			break;
+		default:
+			dprintk(VIDC_ERR, "Invalid slice settings: 0x%x",
+				prop->multi_slice);
+			break;
+		}
 		pkt->size += sizeof(u32) + sizeof(struct
-						hfi_multi_slice_control);
+					hfi_multi_slice_control);
 		break;
 	}
 	case HAL_CONFIG_VPE_DEINTERLACE:
@@ -1162,8 +1436,8 @@ int vidc_hal_session_set_property(void *sess,
 		struct hfi_debug_config *hfi;
 		pkt->rg_property_data[0] = HFI_PROPERTY_SYS_DEBUG_CONFIG;
 		hfi = (struct hfi_debug_config *) &pkt->rg_property_data[1];
-		memcpy(hfi, (struct hfi_debug_config *) pdata,
-				sizeof(struct hfi_debug_config));
+		hfi->debug_config = ((struct hal_debug_config *)
+					pdata)->debug_config;
 		pkt->size = sizeof(struct hfi_cmd_sys_set_property_packet) +
 			sizeof(struct hfi_debug_config);
 		break;
@@ -1197,7 +1471,7 @@ int vidc_hal_session_set_property(void *sess,
 	case HAL_CONFIG_VENC_TIMESTAMP_SCALE:
 	case HAL_PARAM_VENC_LOW_LATENCY:
 	default:
-		HAL_MSG_INFO("DEFAULT: Calling 0x%x", ptype);
+		dprintk(VIDC_INFO, "DEFAULT: Calling 0x%x", ptype);
 		break;
 	}
 	if (vidc_hal_iface_cmdq_write(session->device, pkt))
@@ -1211,12 +1485,12 @@ int vidc_hal_session_get_property(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !pdata) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
 	}
-	HAL_MSG_INFO("IN func: %s, with property id: %d", __func__, ptype);
+	dprintk(VIDC_INFO, "IN func: , with property id: %d", ptype);
 
 	switch (ptype) {
 	case HAL_CONFIG_FRAME_RATE:
@@ -1277,8 +1551,6 @@ int vidc_hal_session_get_property(void *sess,
 		break;
 	case HAL_PARAM_VENC_H264_DEBLOCK_CONTROL:
 		break;
-	case HAL_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF:
-		break;
 	case HAL_PARAM_VENC_SESSION_QP:
 		break;
 	case HAL_CONFIG_VENC_INTRA_PERIOD:
@@ -1324,7 +1596,7 @@ int vidc_hal_session_get_property(void *sess,
 	case HAL_CONFIG_VENC_TIMESTAMP_SCALE:
 	case HAL_PARAM_VENC_LOW_LATENCY:
 	default:
-		HAL_MSG_INFO("DEFAULT: Calling 0x%x", ptype);
+		dprintk(VIDC_INFO, "DEFAULT: Calling 0x%x", ptype);
 		break;
 	}
 	return 0;
@@ -1340,7 +1612,7 @@ void *vidc_hal_session_init(void *device, u32 session_id,
 	if (device) {
 		dev = device;
 	} else {
-		HAL_MSG_ERROR("%s:invalid device", __func__);
+		dprintk(VIDC_ERR, ":invalid device");
 		return NULL;
 	}
 
@@ -1354,7 +1626,7 @@ void *vidc_hal_session_init(void *device, u32 session_id,
 	new_session->device = dev;
 	list_add_tail(&new_session->list, &dev->sess_head);
 	pkt.size = sizeof(struct hfi_cmd_sys_session_init_packet);
-	pkt.packet = HFI_CMD_SYS_SESSION_INIT;
+	pkt.packet_type = HFI_CMD_SYS_SESSION_INIT;
 	pkt.session_id = (u32) new_session;
 	pkt.session_domain = session_type;
 	pkt.session_codec = codec_type;
@@ -1364,7 +1636,7 @@ void *vidc_hal_session_init(void *device, u32 session_id,
 }
 
 static int vidc_hal_send_session_cmd(void *session_id,
-	 enum HFI_COMMAND pkt_type)
+	 int pkt_type)
 {
 	struct vidc_hal_session_cmd_pkt pkt;
 	int rc = 0;
@@ -1373,7 +1645,7 @@ static int vidc_hal_send_session_cmd(void *session_id,
 	if (session_id) {
 		session = session_id;
 	} else {
-		HAL_MSG_ERROR("%s:invalid session", __func__);
+		dprintk(VIDC_ERR, ":invalid session");
 		return -ENODEV;
 	}
 
@@ -1401,6 +1673,7 @@ int vidc_hal_session_abort(void *session)
 int vidc_hal_session_set_buffers(void *sess,
 	struct vidc_buffer_addr_info *buffer_info)
 {
+	u32 buffer;
 	struct hfi_cmd_session_set_buffers_packet *pkt;
 	u8 packet[VIDC_IFACEQ_VAR_LARGE_PKT_SIZE];
 	int rc = 0;
@@ -1408,7 +1681,7 @@ int vidc_hal_session_set_buffers(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !buffer_info) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1431,7 +1704,7 @@ int vidc_hal_session_set_buffers(void *sess,
 	if ((buffer_info->buffer_type == HAL_BUFFER_OUTPUT) ||
 		(buffer_info->buffer_type == HAL_BUFFER_OUTPUT2)) {
 		struct hfi_buffer_info *buff;
-		pkt->extradata_size = buffer_info->extradata_size;
+		pkt->extra_data_size = buffer_info->extradata_size;
 		pkt->size = sizeof(struct hfi_cmd_session_set_buffers_packet) -
 			sizeof(u32) + ((buffer_info->num_buffers) *
 			sizeof(struct hfi_buffer_info));
@@ -1439,25 +1712,23 @@ int vidc_hal_session_set_buffers(void *sess,
 		for (i = 0; i < pkt->num_buffers; i++) {
 			buff->buffer_addr =
 				buffer_info->align_device_addr;
-			buff->extradata_addr =
+			buff->extra_data_addr =
 				buffer_info->extradata_addr;
 		}
 	} else {
-		pkt->extradata_size = 0;
+		pkt->extra_data_size = 0;
 		pkt->size = sizeof(struct hfi_cmd_session_set_buffers_packet) +
 			((buffer_info->num_buffers - 1) * sizeof(u32));
 		for (i = 0; i < pkt->num_buffers; i++)
 			pkt->rg_buffer_info[i] =
 			buffer_info->align_device_addr;
 	}
-
-	if (buffer_info->buffer_type == HAL_BUFFER_INTERNAL_SCRATCH)
-		pkt->buffer_type = HFI_BUFFER_INTERNAL_SCRATCH;
-	else if (buffer_info->buffer_type == HAL_BUFFER_INTERNAL_PERSIST)
-		pkt->buffer_type = HFI_BUFFER_INTERNAL_PERSIST;
+	buffer = get_hfi_buffer(buffer_info->buffer_type);
+	if (buffer)
+		pkt->buffer_type = buffer;
 	else
-		pkt->buffer_type = (enum HFI_BUFFER) buffer_info->buffer_type;
-
+		return -EINVAL;
+	dprintk(VIDC_INFO, "set buffers: 0x%x", buffer_info->buffer_type);
 	if (vidc_hal_iface_cmdq_write(session->device, pkt))
 		rc = -ENOTEMPTY;
 	return rc;
@@ -1466,6 +1737,7 @@ int vidc_hal_session_set_buffers(void *sess,
 int vidc_hal_session_release_buffers(void *sess,
 	struct vidc_buffer_addr_info *buffer_info)
 {
+	u32 buffer;
 	struct hfi_cmd_session_release_buffer_packet *pkt;
 	u8 packet[VIDC_IFACEQ_VAR_LARGE_PKT_SIZE];
 	int rc = 0;
@@ -1473,7 +1745,7 @@ int vidc_hal_session_release_buffers(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !buffer_info) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1487,7 +1759,6 @@ int vidc_hal_session_release_buffers(void *sess,
 		((buffer_info->num_buffers - 1) * sizeof(u32));
 	pkt->packet_type = HFI_CMD_SESSION_RELEASE_BUFFERS;
 	pkt->session_id = (u32) session;
-	pkt->buffer_type = (enum HFI_BUFFER) buffer_info->buffer_type;
 	pkt->buffer_size = buffer_info->buffer_size;
 	pkt->num_buffers = buffer_info->num_buffers;
 
@@ -1498,10 +1769,10 @@ int vidc_hal_session_release_buffers(void *sess,
 		for (i = 0; i < pkt->num_buffers; i++) {
 			buff->buffer_addr =
 				buffer_info->align_device_addr;
-			buff->extradata_addr =
+			buff->extra_data_addr =
 				buffer_info->extradata_addr;
 		}
-		pkt->extradata_size = buffer_info->extradata_size;
+		pkt->extra_data_size = buffer_info->extradata_size;
 		pkt->size = sizeof(struct hfi_cmd_session_set_buffers_packet) -
 			sizeof(u32) + ((buffer_info->num_buffers) *
 			sizeof(struct hfi_buffer_info));
@@ -1509,11 +1780,16 @@ int vidc_hal_session_release_buffers(void *sess,
 		for (i = 0; i < pkt->num_buffers; i++)
 			pkt->rg_buffer_info[i] =
 			buffer_info->align_device_addr;
-		pkt->extradata_size = 0;
+		pkt->extra_data_size = 0;
 		pkt->size = sizeof(struct hfi_cmd_session_set_buffers_packet) +
 			((buffer_info->num_buffers - 1) * sizeof(u32));
 	}
-
+	buffer = get_hfi_buffer(buffer_info->buffer_type);
+	if (buffer)
+		pkt->buffer_type = buffer;
+	else
+		return -EINVAL;
+	dprintk(VIDC_INFO, "Release buffers: 0x%x", buffer_info->buffer_type);
 	if (vidc_hal_iface_cmdq_write(session->device, pkt))
 		rc = -ENOTEMPTY;
 	return rc;
@@ -1561,7 +1837,7 @@ int vidc_hal_session_etb(void *sess, struct vidc_frame_data *input_frame)
 	struct hal_session *session;
 
 	if (!sess || !input_frame) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1573,8 +1849,8 @@ int vidc_hal_session_etb(void *sess, struct vidc_frame_data *input_frame)
 			struct hfi_cmd_session_empty_buffer_compressed_packet);
 		pkt.packet_type = HFI_CMD_SESSION_EMPTY_BUFFER;
 		pkt.session_id = (u32) session;
-		pkt.timestamp_hi = (int) (((u64)input_frame->timestamp) >> 32);
-		pkt.timestamp_lo = (int) input_frame->timestamp;
+		pkt.time_stamp_hi = (int) (((u64)input_frame->timestamp) >> 32);
+		pkt.time_stamp_lo = (int) input_frame->timestamp;
 		pkt.flags = input_frame->flags;
 		pkt.mark_target = input_frame->mark_target;
 		pkt.mark_data = input_frame->mark_data;
@@ -1583,7 +1859,7 @@ int vidc_hal_session_etb(void *sess, struct vidc_frame_data *input_frame)
 		pkt.filled_len = input_frame->filled_len;
 		pkt.input_tag = input_frame->clnt_data;
 		pkt.packet_buffer = (u8 *) input_frame->device_addr;
-		HAL_MSG_ERROR("### Q DECODER INPUT BUFFER ###");
+		dprintk(VIDC_DBG, "Q DECODER INPUT BUFFER");
 		if (vidc_hal_iface_cmdq_write(session->device, &pkt))
 			rc = -ENOTEMPTY;
 	} else {
@@ -1591,11 +1867,11 @@ int vidc_hal_session_etb(void *sess, struct vidc_frame_data *input_frame)
 			pkt;
 		pkt.size = sizeof(struct
 		hfi_cmd_session_empty_buffer_uncompressed_plane0_packet);
-		pkt.packet = HFI_CMD_SESSION_EMPTY_BUFFER;
+		pkt.packet_type = HFI_CMD_SESSION_EMPTY_BUFFER;
 		pkt.session_id = (u32) session;
 		pkt.view_id = 0;
-		pkt.timestamp_hi = (u32) (((u64)input_frame->timestamp) >> 32);
-		pkt.timestamp_lo = (u32) input_frame->timestamp;
+		pkt.time_stamp_hi = (u32) (((u64)input_frame->timestamp) >> 32);
+		pkt.time_stamp_lo = (u32) input_frame->timestamp;
 		pkt.flags = input_frame->flags;
 		pkt.mark_target = input_frame->mark_target;
 		pkt.mark_data = input_frame->mark_data;
@@ -1604,7 +1880,7 @@ int vidc_hal_session_etb(void *sess, struct vidc_frame_data *input_frame)
 		pkt.filled_len = input_frame->filled_len;
 		pkt.input_tag = input_frame->clnt_data;
 		pkt.packet_buffer = (u8 *) input_frame->device_addr;
-		HAL_MSG_ERROR("### Q ENCODER INPUT BUFFER ###");
+		dprintk(VIDC_DBG, "Q ENCODER INPUT BUFFER");
 		if (vidc_hal_iface_cmdq_write(session->device, &pkt))
 			rc = -ENOTEMPTY;
 	}
@@ -1619,7 +1895,7 @@ int vidc_hal_session_ftb(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !output_frame) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1636,7 +1912,7 @@ int vidc_hal_session_ftb(void *sess,
 	pkt.extra_data_buffer =
 		(u8 *) output_frame->extradata_addr;
 
-	HAL_MSG_INFO("### Q OUTPUT BUFFER ###");
+	dprintk(VIDC_INFO, "### Q OUTPUT BUFFER ###");
 	if (vidc_hal_iface_cmdq_write(session->device, &pkt))
 		rc = -ENOTEMPTY;
 	return rc;
@@ -1651,7 +1927,7 @@ int vidc_hal_session_parse_seq_hdr(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !seq_hdr) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1678,7 +1954,7 @@ int vidc_hal_session_get_seq_hdr(void *sess,
 	struct hal_session *session;
 
 	if (!sess || !seq_hdr) {
-		HAL_MSG_ERROR("Invalid Params in %s", __func__);
+		dprintk(VIDC_ERR, "Invalid Params in ");
 		return -EINVAL;
 	} else {
 		session = sess;
@@ -1705,7 +1981,7 @@ int vidc_hal_session_get_buf_req(void *sess)
 	if (sess) {
 		session = sess;
 	} else {
-		HAL_MSG_ERROR("%s:invalid session", __func__);
+		dprintk(VIDC_ERR, ":invalid session");
 		return -ENODEV;
 	}
 
@@ -1728,15 +2004,30 @@ int vidc_hal_session_flush(void *sess, enum hal_flush flush_mode)
 	if (sess) {
 		session = sess;
 	} else {
-		HAL_MSG_ERROR("%s:invalid session", __func__);
+		dprintk(VIDC_ERR, ":invalid session");
 		return -ENODEV;
 	}
 
 	pkt.size = sizeof(struct hfi_cmd_session_flush_packet);
 	pkt.packet_type = HFI_CMD_SESSION_FLUSH;
 	pkt.session_id = (u32) session;
-	pkt.flush_type = flush_mode;
-
+	switch (flush_mode) {
+	case HAL_FLUSH_INPUT:
+		pkt.flush_type = HFI_FLUSH_INPUT;
+		break;
+	case HAL_FLUSH_OUTPUT:
+		pkt.flush_type = HFI_FLUSH_OUTPUT;
+		break;
+	case HAL_FLUSH_OUTPUT2:
+		pkt.flush_type = HFI_FLUSH_OUTPUT2;
+		break;
+	case HAL_FLUSH_ALL:
+		pkt.flush_type = HFI_FLUSH_ALL;
+		break;
+	default:
+		dprintk(VIDC_ERR, "Invalid flush mode: 0x%x\n", flush_mode);
+		break;
+	}
 	if (vidc_hal_iface_cmdq_write(session->device, &pkt))
 		rc = -ENOTEMPTY;
 	return rc;
@@ -1753,11 +2044,11 @@ static int vidc_hal_check_core_registered(
 		list_for_each_safe(curr, next, &core.dev_head) {
 			device = list_entry(curr, struct hal_device, list);
 			if (device && device->hal_data->irq == irq &&
-				(CONTAINS((u32)device->hal_data->
+				(CONTAINS(device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE, fw_addr) ||
 				CONTAINS(fw_addr, FIRMWARE_SIZE,
-						(u32)device->hal_data->
+						device->hal_data->
 						device_base_addr) ||
 				CONTAINS((u32)device->hal_data->
 						register_base_addr,
@@ -1771,22 +2062,22 @@ static int vidc_hal_check_core_registered(
 				OVERLAPS(reg_addr, reg_size,
 						(u32)device->hal_data->
 						register_base_addr, reg_size) ||
-				OVERLAPS((u32)device->hal_data->
+				OVERLAPS(device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE, fw_addr,
 						FIRMWARE_SIZE) ||
 				OVERLAPS(fw_addr, FIRMWARE_SIZE,
-						(u32)device->hal_data->
+						device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE))) {
 				return 0;
 			} else {
-				HAL_MSG_INFO("Device not registered");
+				dprintk(VIDC_INFO, "Device not registered");
 				return -EINVAL;
 			}
 		}
 	} else {
-		HAL_MSG_INFO("no device Registered");
+		dprintk(VIDC_INFO, "no device Registered");
 	}
 	return -EINVAL;
 }
@@ -1796,9 +2087,9 @@ static void vidc_hal_core_work_handler(struct work_struct *work)
 	struct hal_device *device = list_first_entry(
 		&hal_ctxt.dev_head, struct hal_device, list);
 
-	HAL_MSG_INFO(" GOT INTERRUPT %s() ", __func__);
+	dprintk(VIDC_INFO, " GOT INTERRUPT () ");
 	if (!device->callback) {
-		HAL_MSG_ERROR("No callback function	"
+		dprintk(VIDC_ERR, "No callback function	"
 					  "to process interrupt: %p\n", device);
 		return;
 	}
@@ -1811,10 +2102,10 @@ static DECLARE_WORK(vidc_hal_work, vidc_hal_core_work_handler);
 static irqreturn_t vidc_hal_isr(int irq, void *dev)
 {
 	struct hal_device *device = dev;
-	HAL_MSG_MEDIUM("\n vidc_hal_isr() %d ", irq);
+	dprintk(VIDC_INFO, "vidc_hal_isr() %d ", irq);
 	disable_irq_nosync(irq);
 	queue_work(device->vidc_workq, &vidc_hal_work);
-	HAL_MSG_MEDIUM("\n vidc_hal_isr() %d ", irq);
+	dprintk(VIDC_INFO, "vidc_hal_isr() %d ", irq);
 	return IRQ_HANDLED;
 }
 
@@ -1826,48 +2117,43 @@ void *vidc_hal_add_device(u32 device_id, u32 fw_base_addr, u32 reg_base,
 	struct hal_data *hal = NULL;
 	int rc = 0;
 
-	if (device_id || !fw_base_addr || !reg_base || !reg_size ||
+	if (device_id || !reg_base || !reg_size ||
 			!irq || !callback) {
-		HAL_MSG_ERROR("Invalid Paramters");
+		dprintk(VIDC_ERR, "Invalid Paramters");
 		return NULL;
 	} else {
-		HAL_MSG_INFO("entered %s, device_id: %d", __func__, device_id);
+		dprintk(VIDC_INFO, "entered , device_id: %d", device_id);
 	}
 
 	if (vidc_hal_check_core_registered(hal_ctxt, fw_base_addr,
 						reg_base, reg_size, irq)) {
-		HAL_MSG_LOW("HAL_DATA will be assigned now");
+		dprintk(VIDC_DBG, "HAL_DATA will be assigned now");
 		hal = (struct hal_data *)
 			kzalloc(sizeof(struct hal_data), GFP_KERNEL);
 		if (!hal) {
-			HAL_MSG_ERROR("Failed to alloc");
+			dprintk(VIDC_ERR, "Failed to alloc");
 			return NULL;
 		}
 		hal->irq = irq;
-		hal->device_base_addr =
-			ioremap_nocache(fw_base_addr, FIRMWARE_SIZE);
-		if (!hal->device_base_addr) {
-			HAL_MSG_ERROR("could not map fw addr %d of size %d",
-						  fw_base_addr, FIRMWARE_SIZE);
-			goto err_map;
-		}
+		hal->device_base_addr = fw_base_addr;
 		hal->register_base_addr =
 			ioremap_nocache(reg_base, reg_size);
 		if (!hal->register_base_addr) {
-			HAL_MSG_ERROR("could not map reg addr %d of size %d",
-						  reg_base, reg_size);
+			dprintk(VIDC_ERR,
+				"could not map reg addr %d of size %d",
+				reg_base, reg_size);
 			goto err_map;
 		}
 		INIT_LIST_HEAD(&hal_ctxt.dev_head);
 	} else {
-		HAL_MSG_ERROR("Core present/Already added");
+		dprintk(VIDC_ERR, "Core present/Already added");
 		return NULL;
 	}
 
 	hdevice = (struct hal_device *)
 			kzalloc(sizeof(struct hal_device), GFP_KERNEL);
 	if (!hdevice) {
-		HAL_MSG_ERROR("failed to allocate new device");
+		dprintk(VIDC_ERR, "failed to allocate new device");
 		goto err_map;
 	}
 
@@ -1881,14 +2167,14 @@ void *vidc_hal_add_device(u32 device_id, u32 fw_base_addr, u32 reg_base,
 	hdevice->vidc_workq = create_singlethread_workqueue(
 		"msm_vidc_workerq");
 	if (!hdevice->vidc_workq) {
-		HAL_MSG_ERROR("%s: create workq failed\n", __func__);
+		dprintk(VIDC_ERR, ": create workq failed\n");
 		goto error_createq;
 	}
 
 	rc = request_irq(irq, vidc_hal_isr, IRQF_TRIGGER_HIGH,
 			"msm_vidc", hdevice);
 	if (unlikely(rc)) {
-		HAL_MSG_ERROR("%s() :request_irq failed\n", __func__);
+		dprintk(VIDC_ERR, "() :request_irq failed\n");
 		goto error_irq_fail;
 	}
 	disable_irq_nosync(irq);

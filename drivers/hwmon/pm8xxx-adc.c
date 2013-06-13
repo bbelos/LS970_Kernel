@@ -55,13 +55,6 @@
 #define PM8XXX_ADC_ARB_USRP_AMUX_CNTRL_SEL3		BIT(7)
 
 #define PM8XXX_ADC_ARB_USRP_ANA_PARAM			0x199
-
-#ifndef PA_THERM 
-#ifndef CONFIG_MACH_APQ8064_J1D
-#define PM8XXX_ADC_ARB_USRP_ANA_PARAM_VREF_XO_THM	BIT(2)
-#endif
-#endif
-
 #define PM8XXX_ADC_ARB_USRP_DIG_PARAM			0x19A
 #define PM8XXX_ADC_ARB_USRP_DIG_PARAM_SEL_SHIFT0	BIT(0)
 #define PM8XXX_ADC_ARB_USRP_DIG_PARAM_SEL_SHIFT1	BIT(1)
@@ -130,17 +123,11 @@
 #define PM8XXX_ADC_PA_THERM_VREG_UA_LOAD		100000
 #define PM8XXX_ADC_HWMON_NAME_LENGTH			32
 #define PM8XXX_ADC_BTM_INTERVAL_MAX			0x14
+#define PM8XXX_ADC_COMPLETION_TIMEOUT			(2 * HZ)
 /* Ref patch test */
 #define PM8XXX_ADC_APQ_THERM_VREG_UV_MIN               2220000
 #define PM8XXX_ADC_APQ_THERM_VREG_UV_MAX               2220000
 #define PM8XXX_ADC_APQ_THERM_VREG_UA_LOAD              100000
-
-#ifndef PA_THERM
-#ifndef CONFIG_MACH_APQ8064_J1D
-#define PM8XXX_TEMP_ALRM_PWM 0x09B
-#define PM8XXX_XO_CNT2 0x114
-#endif
-#endif
 
 struct pm8xxx_adc {
 	struct device				*dev;
@@ -411,11 +398,6 @@ static int32_t pm8xxx_adc_configure(
 				struct pm8xxx_adc_amux_properties *chan_prop)
 {
 	u8 data_amux_chan = 0, data_arb_rsv = 0, data_dig_param = 0;
-#if 0//ndef PA_THERM
-#if !defined(CONFIG_MACH_APQ8064_J1D) && !defined(CONFIG_MACH_APQ8064_J1KD)
-	u8 data_temp = 0;
-#endif
-#endif
 	int rc;
 
 	data_amux_chan |= chan_prop->amux_channel << PM8XXX_ADC_AMUX_SEL;
@@ -473,15 +455,6 @@ static int32_t pm8xxx_adc_configure(
 	if (rc < 0)
 		return rc;
 
-#if 0//ndef PA_THERM
-#if !defined(CONFIG_MACH_APQ8064_J1D) && !defined(CONFIG_MACH_APQ8064_J1KD)
-	rc = pm8xxx_adc_read_reg(PM8XXX_XO_CNT2, &data_temp);
-	data_temp &=0xFC;
-	data_temp |=0x01;
-	rc = pm8xxx_adc_write_reg(PM8XXX_XO_CNT2, data_temp);
-#endif
-#endif
-
 	rc = pm8xxx_adc_arb_cntrl(1, data_amux_chan);
 	if (rc < 0) {
 		pr_err("Configuring ADC Arbiter"
@@ -492,30 +465,6 @@ static int32_t pm8xxx_adc_configure(
 	return 0;
 }
 
-#if 0//ndef PA_THERM
-#if !defined(CONFIG_MACH_APQ8064_J1D) && !defined(CONFIG_MACH_APQ8064_J1KD)
-int32_t pm8xxx_adc_unconfigure(void)
-{
-	u8 data_temp = 0;
-	int rc;
-
-	pr_info("%s\n", __func__);
-
-	rc = pm8xxx_adc_read_reg(PM8XXX_XO_CNT2, &data_temp);
-	if (rc < 0) {
-		pr_info("%s pm8xxx_adc_read_reg failed\n", __func__);
-		return rc;
-	}
-	data_temp &=0xFC;
-	rc = pm8xxx_adc_write_reg(PM8XXX_XO_CNT2, data_temp);
-	if (rc < 0) {
-		pr_info("%s pm8xxx_adc_write_reg failed\n", __func__);
-		return rc;
-	}
-	return 0;
-}
-#endif
-#endif
 static uint32_t pm8xxx_adc_read_adc_code(int32_t *data)
 {
 	struct pm8xxx_adc *adc_pmic = pmic_adc;
@@ -788,12 +737,6 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 	int i = 0, rc = 0, rc_fail, amux_prescaling, scale_type;
 	enum pm8xxx_adc_premux_mpp_scale_type mpp_scale;
 
-#ifndef PA_THERM
-#ifndef CONFIG_MACH_APQ8064_J1D
-	u8 data = 0;  /* [LGE_TEST_S] Kyungho.Kong] */
-#endif
-#endif
-
 	if (!pm8xxx_adc_initialized)
 		return -ENODEV;
 
@@ -803,19 +746,6 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 	}
 
 	mutex_lock(&adc_pmic->adc_lock);
-
-#ifndef PA_THERM
-#ifndef CONFIG_MACH_APQ8064_J1D
-    /* [LGE_TEST_S] Kyungho.Kong] */
-	if(channel == ADC_MPP_1_AMUX3)
-	{
-	  pm8xxx_readb(adc_pmic->dev->parent, 0x103, &data);
-	  data = data | 0x80;
-	  pm8xxx_writeb(adc_pmic->dev->parent, 0x103, data);
-	}
-	/* [LGE_TEST_E] Kyungho.Kong] */
-#endif
-#endif
 
 	for (i = 0; i < adc_pmic->adc_num_board_channel; i++) {
 		if (channel == adc_pmic->adc_channel[i].channel_name)
@@ -864,7 +794,23 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 		goto fail;
 	}
 
-	wait_for_completion(&adc_pmic->adc_rslt_completion);
+	rc = wait_for_completion_timeout(&adc_pmic->adc_rslt_completion,
+						PM8XXX_ADC_COMPLETION_TIMEOUT);
+	if (!rc) {
+		u8 data_arb_usrp_cntrl1 = 0;
+		rc = pm8xxx_adc_read_reg(PM8XXX_ADC_ARB_USRP_CNTRL1,
+					&data_arb_usrp_cntrl1);
+		if (rc < 0)
+			goto fail;
+		if (data_arb_usrp_cntrl1 == (PM8XXX_ADC_ARB_USRP_CNTRL1_EOC |
+					PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB))
+			pr_debug("End of conversion status set\n");
+		else {
+			pr_err("EOC interrupt not received\n");
+			rc = -EINVAL;
+			goto fail;
+		}
+	}
 
 	rc = pm8xxx_adc_read_adc_code(&result->adc_code);
 	if (rc) {
@@ -886,19 +832,6 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 		rc = -EINVAL;
 		goto fail_unlock;
 	}
-	
-#ifndef PA_THERM
-#ifndef CONFIG_MACH_APQ8064_J1D
-    /* [LGE_TEST_S] Kyungho.Kong] */
-	if(channel == ADC_MPP_1_AMUX3)
-	{
-	  pm8xxx_readb(adc_pmic->dev->parent, 0x103, &data);
-	  data = data & 0x7F;
-	  pm8xxx_writeb(adc_pmic->dev->parent, 0x103, data);
-	}
-	/* [LGE_TEST_E] Kyungho.Kong] */
-#endif
-#endif
 
 	mutex_unlock(&adc_pmic->adc_lock);
 
@@ -1267,6 +1200,7 @@ static int32_t pm8xxx_adc_init_hwmon(struct platform_device *pdev)
 						adc_pmic->adc_channel[i].name;
 		memcpy(&adc_pmic->sens_attr[i], &pm8xxx_adc_attr,
 						sizeof(pm8xxx_adc_attr));
+		sysfs_attr_init(&adc_pmic->sens_attr[i].dev_attr.attr);
 		rc = device_create_file(&pdev->dev,
 				&adc_pmic->sens_attr[i].dev_attr);
 		if (rc) {

@@ -109,7 +109,7 @@ static struct pm8xxx_gpio_init pm8921_gpios[] __initdata = {
 	PM8XXX_GPIO_OUTPUT(43, 1),                       /* DISP_RESET_N */
 	PM8XXX_GPIO_OUTPUT(42, 0),                      /* USB 5V reg enable */
 	/* TABLA CODEC RESET */
-	PM8XXX_GPIO_OUTPUT_STRENGTH(34, 1, PM_GPIO_STRENGTH_MED)
+	PM8XXX_GPIO_OUTPUT_STRENGTH(34, 0, PM_GPIO_STRENGTH_MED)
 };
 
 /* Initial PM8921 MPP configurations */
@@ -249,8 +249,8 @@ static struct pm8xxx_keypad_platform_data keypad_data_liquid = {
 static const unsigned int keymap[] = {
 	KEY(0, 0, KEY_VOLUMEUP),
 	KEY(0, 1, KEY_VOLUMEDOWN),
-	KEY(0, 2, KEY_CAMERA_SNAPSHOT),
-	KEY(0, 3, KEY_CAMERA_FOCUS),
+	KEY(0, 2, KEY_CAMERA_FOCUS),
+	KEY(0, 3, KEY_CAMERA_SNAPSHOT),
 };
 
 static struct matrix_keymap_data keymap_data = {
@@ -386,25 +386,6 @@ static const unsigned int keymap_sim[] = {
 	KEY(0, 3, KEY_CAMERA_FOCUS),
 };
 
-static struct matrix_keymap_data keymap_data_sim = {
-	.keymap_size    = ARRAY_SIZE(keymap_sim),
-	.keymap         = keymap_sim,
-};
-
-static struct pm8xxx_keypad_platform_data keypad_data_sim = {
-	.input_name             = "keypad_8960",
-	.input_phys_device      = "keypad_8960/input0",
-	.num_rows               = 12,
-	.num_cols               = 8,
-	.rows_gpio_start	= PM8921_GPIO_PM_TO_SYS(9),
-	.cols_gpio_start	= PM8921_GPIO_PM_TO_SYS(1),
-	.debounce_ms            = 15,
-	.scan_delay_ms          = 32,
-	.row_hold_ns            = 91500,
-	.wakeup                 = 1,
-	.keymap_data            = &keymap_data_sim,
-};
-
 static int pm8921_therm_mitigation[] = {
 	1100,
 	700,
@@ -413,13 +394,16 @@ static int pm8921_therm_mitigation[] = {
 };
 
 #define MAX_VOLTAGE_MV		4200
+#define CHG_TERM_MA		100
 static struct pm8921_charger_platform_data pm8921_chg_pdata __devinitdata = {
 	.safety_time		= 180,
 	.update_time		= 60000,
 	.max_voltage		= MAX_VOLTAGE_MV,
 	.min_voltage		= 3200,
-	.resume_voltage_delta	= 100,
-	.term_current		= 100,
+	.uvd_thresh_voltage	= 4050,
+	.resume_voltage_delta	= 60,
+	.resume_charge_percent	= 99,
+	.term_current		= CHG_TERM_MA,
 	.cool_temp		= 10,
 	.warm_temp		= 40,
 	.temp_check_period	= 1,
@@ -438,11 +422,14 @@ static struct pm8xxx_misc_platform_data pm8xxx_misc_pdata = {
 };
 
 static struct pm8921_bms_platform_data pm8921_bms_pdata __devinitdata = {
-	.battery_type	= BATT_UNKNOWN,
-	.r_sense		= 10,
-	.v_cutoff		= 3400,
-	.max_voltage_uv		= MAX_VOLTAGE_MV * 1000,
-	.rconn_mohm		= 30,
+	.battery_type			= BATT_UNKNOWN,
+	.r_sense			= 10,
+	.v_cutoff			= 3400,
+	.max_voltage_uv			= MAX_VOLTAGE_MV * 1000,
+	.rconn_mohm			= 18,
+	.shutdown_soc_valid_limit	= 20,
+	.adjust_soc_low_threshold	= 25,
+	.chg_term_ua			= CHG_TERM_MA * 1000,
 };
 
 #define	PM8921_LC_LED_MAX_CURRENT	4	/* I = 4mA */
@@ -455,8 +442,6 @@ static struct pm8921_bms_platform_data pm8921_bms_pdata __devinitdata = {
  */
 #define PM8XXX_PWM_CHANNEL_NONE		-1
 
-
-#if !defined(CONFIG_LGE_PM)
 static struct led_info pm8921_led_info_liquid[] = {
 	{
 		.name		= "led:red",
@@ -529,11 +514,16 @@ static int pm8921_led0_pwm_duty_pcts[56] = {
 		14, 10, 6, 4, 1
 };
 
+/*
+ * Note: There is a bug in LPG module that results in incorrect
+ * behavior of pattern when LUT index 0 is used. So effectively
+ * there are 63 usable LUT entries.
+ */
 static struct pm8xxx_pwm_duty_cycles pm8921_led0_pwm_duty_cycles = {
 	.duty_pcts = (int *)&pm8921_led0_pwm_duty_pcts,
 	.num_duty_pcts = ARRAY_SIZE(pm8921_led0_pwm_duty_pcts),
 	.duty_ms = PM8XXX_LED_PWM_DUTY_MS,
-	.start_idx = 0,
+	.start_idx = 1,
 };
 
 static struct pm8xxx_led_config pm8921_led_configs[] = {
@@ -559,7 +549,6 @@ static struct pm8xxx_led_platform_data pm8xxx_leds_pdata = {
 		.configs = pm8921_led_configs,
 		.num_configs = ARRAY_SIZE(pm8921_led_configs),
 };
-#endif
 
 static struct pm8xxx_ccadc_platform_data pm8xxx_ccadc_pdata = {
 	.r_sense		= 10,
@@ -589,9 +578,7 @@ static struct pm8921_platform_data pm8921_platform_data __devinitdata = {
 	.charger_pdata		= &pm8921_chg_pdata,
 	.bms_pdata		= &pm8921_bms_pdata,
 	.adc_pdata		= &pm8xxx_adc_pdata,
-	#if !defined(CONFIG_LGE_PM)
 	.leds_pdata		= &pm8xxx_leds_pdata,
-	#endif
 	.ccadc_pdata		= &pm8xxx_ccadc_pdata,
 	.pwm_pdata		= &pm8xxx_pwm_pdata,
 };
@@ -611,18 +598,14 @@ void __init msm8960_init_pmic(void)
 				&msm8960_ssbi_pm8921_pdata;
 	pm8921_platform_data.num_regulators = msm_pm8921_regulator_pdata_len;
 
-	/* Simulator supports a QWERTY keypad */
-	if (machine_is_msm8960_sim())
-		pm8921_platform_data.keypad_pdata = &keypad_data_sim;
-
 	if (machine_is_msm8960_liquid()) {
 		pm8921_platform_data.keypad_pdata = &keypad_data_liquid;
-		#if !defined(CONFIG_LGE_PM)
 		pm8921_platform_data.leds_pdata = &pm8xxx_leds_pdata_liquid;
-		#endif
 		pm8921_platform_data.bms_pdata->battery_type = BATT_DESAY;
 	} else if (machine_is_msm8960_mtp()) {
 		pm8921_platform_data.bms_pdata->battery_type = BATT_PALLADIUM;
+	} else if (machine_is_msm8960_cdp()) {
+		pm8921_chg_pdata.has_dc_supply = true;
 	}
 
 	if (machine_is_msm8960_fluid())

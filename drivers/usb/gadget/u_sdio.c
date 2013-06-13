@@ -990,8 +990,10 @@ void gsdio_disconnect(struct gserial *gser, u8 portno)
 
 	/* disable endpoints, aborting down any active I/O */
 	usb_ep_disable(gser->out);
+	gser->out->driver_data = NULL;
 
 	usb_ep_disable(gser->in);
+	gser->in->driver_data = NULL;
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	gsdio_free_requests(gser->out, &port->read_pool);
@@ -1139,18 +1141,6 @@ int gsdio_setup(struct usb_gadget *g, unsigned count)
 					__func__);
 			goto free_sdio_ports;
 		}
-
-#if 0//def DEBUG
-		/* REVISIT: create one file per port
-		 * or do not create any file
-		 */
-		if (i == 0) {
-			ret = device_create_file(&g->dev, &dev_attr_input);
-			if (ret)
-				pr_err("%s: unable to create device file\n",
-						__func__);
-		}
-#endif
 
 	}
 

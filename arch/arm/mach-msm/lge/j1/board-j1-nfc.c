@@ -1,3 +1,16 @@
+/* Copyright(c) 2012, LGE Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+
 #include <linux/i2c.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -12,7 +25,7 @@
 #include "board-8064.h"
 /* ehee.lee@lge.com */
 
-#if defined(CONFIG_LGE_NFC_PN544)
+#if defined(CONFIG_LGE_NFC)
 #include <linux/nfc/pn544_lge.h>
 
 /* ehee.lee@lge.com */

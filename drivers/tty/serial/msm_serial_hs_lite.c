@@ -62,8 +62,8 @@ struct msm_hsl_port {
 	unsigned int            old_snap_state;
 	unsigned int		ver_id;
 	int			tx_timeout;
+	uint8_t			isShutdown;
 };
-
 
 #define UARTDM_VERSION_11_13	0
 #define UARTDM_VERSION_14	1
@@ -71,8 +71,6 @@ struct msm_hsl_port {
 #define UART_TO_MSM(uart_port)	((struct msm_hsl_port *) uart_port)
 #define is_console(port)	((port)->cons && \
 				(port)->cons->index == (port)->line)
-
-static bool isShutdown;	 	
 
 static const unsigned int regmap[][UARTDM_LAST] = {
 	[UARTDM_VERSION_11_13] = {
@@ -125,9 +123,15 @@ static struct of_device_id msm_hsl_match_table[] = {
 	},
 	{}
 };
+
+#ifdef CONFIG_SERIAL_MSM_HSL_CONSOLE
+static int get_console_state(struct uart_port *port);
+#else
+static inline int get_console_state(struct uart_port *port) { return -ENODEV; };
+#endif
+
 static struct dentry *debug_base;
 static inline void wait_for_xmitr(struct uart_port *port);
-static int get_console_state(struct uart_port *port);
 static inline void msm_hsl_write(struct uart_port *port,
 				 unsigned int val, unsigned int off)
 {
@@ -515,12 +519,10 @@ static unsigned int msm_hsl_tx_empty(struct uart_port *port)
 static void msm_hsl_reset(struct uart_port *port)
 {
 	unsigned int vid = UART_TO_MSM(port)->ver_id;
-	
-	if( !isShutdown ) // gate a unclocked register
-	{
-		return ;
-	}	
-	
+
+	if( !(UART_TO_MSM(port)->isShutdown) ) // gate a unclocked register
+	    return ;
+
 	/* reset everything */
 	msm_hsl_write(port, RESET_RX, regmap[vid][UARTDM_CR]);
 	msm_hsl_write(port, RESET_TX, regmap[vid][UARTDM_CR]);
@@ -584,11 +586,9 @@ static void msm_hsl_set_baud_rate(struct uart_port *port, unsigned int baud)
 	unsigned int vid;
 	struct msm_hsl_port *msm_hsl_port = UART_TO_MSM(port);
 
-	if( !isShutdown ) // gate a unclocked register
-	{
-	    	return ;
-	}
-	
+	if( !(UART_TO_MSM(port)->isShutdown) ) // gate a unclocked register
+	    return ;
+
 	switch (baud) {
 	case 300:
 		baud_code = UARTDM_CSR_75;
@@ -712,7 +712,9 @@ static int msm_hsl_startup(struct uart_port *port)
 	unsigned int vid;
 	int ret;
 	unsigned long flags;
-	
+
+	UART_TO_MSM(port)->isShutdown = 1 ; // use for shudown flag
+
 	snprintf(msm_hsl_port->name, sizeof(msm_hsl_port->name),
 		 "msm_serial_hsl%d", port->line);
 
@@ -780,9 +782,6 @@ static int msm_hsl_startup(struct uart_port *port)
 		printk(KERN_ERR "%s: failed to request_irq\n", __func__);
 		return ret;
 	}
-	
-	isShutdown = 1 ; // use for shudown flag
-	
 	return 0;
 }
 
@@ -792,9 +791,10 @@ static void msm_hsl_shutdown(struct uart_port *port)
 	struct platform_device *pdev = to_platform_device(port->dev);
 	const struct msm_serial_hslite_platform_data *pdata =
 					pdev->dev.platform_data;
-	
-	isShutdown = 0 ; // use for shudown flag
-	
+
+	UART_TO_MSM(port)->isShutdown = 0 ; // use for shudown flag
+
+
 	msm_hsl_port->imr = 0;
 	/* disable interrupts */
 	msm_hsl_write(port, 0, regmap[msm_hsl_port->ver_id][UARTDM_IMR]);
@@ -836,11 +836,27 @@ static void msm_hsl_set_termios(struct uart_port *port,
  * [CAUTION] UARTDM register must be set AFTER UARTDM clock has been set
  */
 #ifdef CONFIG_LGE_IRDA
+	/*
+	GV ttyHLS3
+	J1D, J1KD ttyHSL1
+	*/
+	#if defined(CONFIG_MACH_APQ8064_GVDCM)
+	if(port->line == 3){
+		msm_hsl_write(port, 0x03, UARTDM_IRDA_ADDR);
+	}
+	#else
 	if(port->line == 1){
 		msm_hsl_write(port, 0x03, UARTDM_IRDA_ADDR);
 	}
+	#endif
+
 #endif
 /* 20111205, chaeuk.lee@lge.com, Add IrDA UART [END] */
+#ifdef CONFIG_LGE_IRRC
+       if(port->line ==1){
+              termios->c_cflag |= B19200;
+       }
+#endif
 	msm_hsl_set_baud_rate(port, baud);
 
 	vid = UART_TO_MSM(port)->ver_id;
@@ -1095,6 +1111,15 @@ static struct msm_hsl_port msm_hsl_uart_ports[] = {
 			.line = 2,
 		},
 	},
+	{
+		.uart = {
+			.iotype = UPIO_MEM,
+			.ops = &msm_hsl_uart_pops,
+			.flags = UPF_BOOT_AUTOCONF,
+			.fifosize = 64,
+			.line = 3,
+		},
+	},
 };
 
 #define UART_NR	ARRAY_SIZE(msm_hsl_uart_ports)
@@ -1153,7 +1178,9 @@ static void wait_for_xmitr(struct uart_port *port)
 	if (!(msm_hsl_read(port, regmap[vid][UARTDM_SR]) &
 			UARTDM_SR_TXEMT_BMSK)) {
 		while (!(msm_hsl_read(port, regmap[vid][UARTDM_ISR]) &
-			UARTDM_ISR_TX_READY_BMSK)) {
+			UARTDM_ISR_TX_READY_BMSK) &&
+		       !(msm_hsl_read(port, regmap[vid][UARTDM_SR]) &
+			UARTDM_SR_TXEMT_BMSK)) {
 			udelay(1);
 			touch_nmi_watchdog();
 			cpu_relax();
@@ -1416,13 +1443,12 @@ static int __devinit msm_serial_hsl_probe(struct platform_device *pdev)
 	if (!gsbi_resource)
 		gsbi_resource = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	msm_hsl_port->clk = clk_get(&pdev->dev, "core_clk");
-	if (gsbi_resource) {
+	msm_hsl_port->pclk = clk_get(&pdev->dev, "iface_clk");
+
+	if (gsbi_resource)
 		msm_hsl_port->is_uartdm = 1;
-		msm_hsl_port->pclk = clk_get(&pdev->dev, "iface_clk");
-	} else {
+	else
 		msm_hsl_port->is_uartdm = 0;
-		msm_hsl_port->pclk = NULL;
-	}
 
 	if (unlikely(IS_ERR(msm_hsl_port->clk))) {
 		printk(KERN_ERR "%s: Error getting clk\n", __func__);
@@ -1503,9 +1529,8 @@ static int msm_serial_hsl_suspend(struct device *dev)
 
 	if (port) {
 
-		if (is_console(port)) {
+		if (is_console(port))
 			msm_hsl_deinit_clock(port);
-        }
 
 		uart_suspend_port(&msm_hsl_uart_driver, port);
 		if (device_may_wakeup(dev))
@@ -1527,11 +1552,8 @@ static int msm_serial_hsl_resume(struct device *dev)
 		if (device_may_wakeup(dev))
 			disable_irq_wake(port->irq);
 
-		if (is_console(port)) {
-            /* LGE sangyup.kim@lge.com add 1ms delay to avoid corruption in console message */
-            mdelay(1);
+		if (is_console(port))
 			msm_hsl_init_clock(port);
-        }
 	}
 
 	return 0;

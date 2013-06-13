@@ -38,20 +38,67 @@ struct msm_spm_device {
 	uint32_t num_modes;
 };
 
+struct msm_spm_vdd_info {
+	uint32_t cpu;
+	uint32_t vlevel;
+	int err;
+};
+
 static struct msm_spm_device msm_spm_l2_device;
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct msm_spm_device, msm_cpu_spm_device);
 
-int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
+
+static void msm_spm_smp_set_vdd(void *data)
 {
 	struct msm_spm_device *dev;
-	int ret = -EIO;
+	struct msm_spm_vdd_info *info = (struct msm_spm_vdd_info *)data;
 
-	dev = &per_cpu(msm_cpu_spm_device, cpu);
-	ret = msm_spm_drv_set_vdd(&dev->reg_data, vlevel);
+	dev = &per_cpu(msm_cpu_spm_device, info->cpu);
+	info->err = msm_spm_drv_set_vdd(&dev->reg_data, info->vlevel);
+}
+
+int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
+{
+	struct msm_spm_vdd_info info;
+	int ret;
+
+	info.cpu = cpu;
+	info.vlevel = vlevel;
+
+	if (cpu_online(cpu)) {
+		/**
+		 * We do not want to set the voltage of another core from
+		 * this core, as its possible that we may race the vdd change
+		 * with the SPM state machine of that core, which could also
+		 * be changing the voltage of that core during power collapse.
+		 * Hence, set the function to be executed on that core and block
+		 * until the vdd change is complete.
+		 */
+		ret = smp_call_function_single(cpu, msm_spm_smp_set_vdd,
+				&info, true);
+		if (!ret)
+			ret = info.err;
+	} else {
+		/**
+		 * Since the core is not online, it is safe to set the vdd
+		 * directly.
+		 */
+		msm_spm_smp_set_vdd(&info);
+		ret = info.err;
+	}
 
 	return ret;
 }
 EXPORT_SYMBOL(msm_spm_set_vdd);
+
+unsigned int msm_spm_get_vdd(unsigned int cpu)
+{
+	struct msm_spm_device *dev;
+
+	dev = &per_cpu(msm_cpu_spm_device, cpu);
+	return msm_spm_drv_get_sts_curr_pmic_data(&dev->reg_data);
+}
+EXPORT_SYMBOL(msm_spm_get_vdd);
 
 static int msm_spm_dev_set_low_power_mode(struct msm_spm_device *dev,
 		unsigned int mode, bool notify_rpm)
@@ -137,7 +184,8 @@ int msm_spm_turn_on_cpu_rail(unsigned int cpu)
 	reg = saw_bases[cpu];
 
 	if (cpu_is_msm8960() || cpu_is_msm8930() || cpu_is_msm8930aa() ||
-	    cpu_is_apq8064() || cpu_is_msm8627()) {
+	    cpu_is_apq8064() || cpu_is_msm8627() || cpu_is_msm8960ab() ||
+						cpu_is_apq8064ab()) {
 		val = 0xA4;
 		reg += 0x14;
 		timeout = 512;
@@ -247,10 +295,10 @@ static int __devinit msm_spm_dev_probe(struct platform_device *pdev)
 		{"qcom,saw2-cfg", MSM_SPM_REG_SAW2_CFG},
 		{"qcom,saw2-avs-ctl", MSM_SPM_REG_SAW2_AVS_CTL},
 		{"qcom,saw2-avs-hysteresis", MSM_SPM_REG_SAW2_AVS_HYSTERESIS},
-		{"qcom,saw2-spm-ctl", MSM_SPM_REG_SAW2_SPM_CTL},
-		{"qcom,saw2-pmic-dly", MSM_SPM_REG_SAW2_PMIC_DLY},
 		{"qcom,saw2-avs-limit", MSM_SPM_REG_SAW2_AVS_LIMIT},
+		{"qcom,saw2-avs-dly", MSM_SPM_REG_SAW2_AVS_DLY},
 		{"qcom,saw2-spm-dly", MSM_SPM_REG_SAW2_SPM_DLY},
+		{"qcom,saw2-spm-ctl", MSM_SPM_REG_SAW2_SPM_CTL},
 		{"qcom,saw2-pmic-data0", MSM_SPM_REG_SAW2_PMIC_DATA_0},
 		{"qcom,saw2-pmic-data1", MSM_SPM_REG_SAW2_PMIC_DATA_1},
 		{"qcom,saw2-pmic-data2", MSM_SPM_REG_SAW2_PMIC_DATA_2},
@@ -267,14 +315,22 @@ static int __devinit msm_spm_dev_probe(struct platform_device *pdev)
 		uint32_t notify_rpm;
 	};
 
-	struct mode_of mode_of_data[] = {
-		{"qcom,spm-cmd-wfi", MSM_SPM_MODE_CLOCK_GATING, 0},
-		{"qcom,spm-cmd-ret", MSM_SPM_MODE_POWER_RETENTION, 0},
-		{"qcom,spm-cmd-spc", MSM_SPM_MODE_POWER_COLLAPSE, 0},
-		{"qcom,spm-cmd-pc", MSM_SPM_MODE_POWER_COLLAPSE, 1},
+	struct mode_of of_cpu_modes[] = {
+		{"qcom,saw2-spm-cmd-wfi", MSM_SPM_MODE_CLOCK_GATING, 0},
+		{"qcom,saw2-spm-cmd-ret", MSM_SPM_MODE_POWER_RETENTION, 0},
+		{"qcom,saw2-spm-cmd-spc", MSM_SPM_MODE_POWER_COLLAPSE, 0},
+		{"qcom,saw2-spm-cmd-pc", MSM_SPM_MODE_POWER_COLLAPSE, 1},
 	};
 
-	BUG_ON(ARRAY_SIZE(mode_of_data) > MSM_SPM_MODE_NR);
+	struct mode_of of_l2_modes[] = {
+		{"qcom,saw2-spm-cmd-ret", MSM_SPM_L2_MODE_RETENTION, 1},
+		{"qcom,saw2-spm-cmd-gdhs", MSM_SPM_L2_MODE_GDHS, 1},
+		{"qcom,saw2-spm-cmd-pc", MSM_SPM_L2_MODE_POWER_COLLAPSE, 1},
+	};
+
+	struct mode_of *mode_of_data;
+	int num_modes;
+
 	memset(&spm_data, 0, sizeof(struct msm_spm_platform_data));
 	memset(&modes, 0,
 		(MSM_SPM_MODE_NR - 2) * sizeof(struct msm_spm_seq_entry));
@@ -324,7 +380,22 @@ static int __devinit msm_spm_dev_probe(struct platform_device *pdev)
 		spm_data.reg_init_values[spm_of_data[i].id] = val;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(mode_of_data); i++) {
+	/*
+	 * Device with id 0..NR_CPUS are SPM for apps cores
+	 * Device with id 0xFFFF is for L2 SPM.
+	 */
+	if (cpu >= 0 && cpu < num_possible_cpus()) {
+		mode_of_data = of_cpu_modes;
+		num_modes = ARRAY_SIZE(of_cpu_modes);
+		dev = &per_cpu(msm_cpu_spm_device, cpu);
+
+	} else {
+		mode_of_data = of_l2_modes;
+		num_modes = ARRAY_SIZE(of_l2_modes);
+		dev = &msm_spm_l2_device;
+	}
+
+	for (i = 0; i < num_modes; i++) {
 		key = mode_of_data[i].key;
 		modes[mode_count].cmd =
 			(uint8_t *)of_get_property(node, key, &len);
@@ -338,16 +409,8 @@ static int __devinit msm_spm_dev_probe(struct platform_device *pdev)
 	spm_data.modes = modes;
 	spm_data.num_modes = mode_count;
 
-	/*
-	 * Device with id 0..NR_CPUS are SPM for apps cores
-	 * Device with id 0xFFFF is for L2 SPM.
-	 */
-	if (cpu >= 0 && cpu < num_possible_cpus())
-		dev = &per_cpu(msm_cpu_spm_device, cpu);
-	else
-		dev = &msm_spm_l2_device;
-
 	ret = msm_spm_dev_init(dev, &spm_data);
+
 	if (ret < 0)
 		pr_warn("%s():failed core-id:%u ret:%d\n", __func__, cpu, ret);
 

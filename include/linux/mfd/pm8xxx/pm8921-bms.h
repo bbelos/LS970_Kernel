@@ -139,6 +139,12 @@ struct pm8921_bms_platform_data {
 	int				shutdown_soc_valid_limit;
 	int				ignore_shutdown_soc;
 	int				adjust_soc_low_threshold;
+	int				chg_term_ua;
+#ifdef CONFIG_LGE_PM
+	/* MAKO patch */
+	int				eoc_check_soc;
+	int 			first_fixed_iavg_ma;
+#endif
 };
 
 #if defined(CONFIG_PM8921_BMS) || defined(CONFIG_PM8921_BMS_MODULE)
@@ -153,14 +159,9 @@ extern struct pm8921_bms_battery_data  LGE_2200_PMH_data;
 #endif
 
 
-/* LGE_PM_S Added temp offset 5 Celsius kwangjae1.lee@lge.com */
-
-#if defined(CONFIG_MACH_APQ8064_J1A)||defined(CONFIG_MACH_APQ8064_J1U) ||defined(CONFIG_MACH_APQ8064_J1SP)
-#define LGE_temp_OFFSET 50
-#else
-#define LGE_temp_OFFSET 0
+#if !defined(CONFIG_BATTERY_MAX17043) && !defined(CONFIG_BATTERY_MAX17047)
+#define BMS_SYSFS_RESET
 #endif
-
 //#define LGE_BMS_DEBUG
 
 

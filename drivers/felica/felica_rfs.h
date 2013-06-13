@@ -1,6 +1,6 @@
 /*
  *  felica_rfs.h
- *  
+ *
  */
 
 #ifndef __FELICA_RFS_H__

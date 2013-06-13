@@ -19,6 +19,9 @@
 
 #include "../inc/broadcast_fc8050.h"
 
+//wonhee.jeong test start
+#include <linux/string.h>
+//wonhee.jeong test end
 
 /*============================================================
 **    1.   DEFINITIONS
@@ -106,6 +109,7 @@ typedef enum	fc8050_service_type
 	FC8050_VISUAL =3,
 	FC8050_DATA,
 	FC8050_ENSQUERY = 6,	/* LGE Added */
+	FC8050_BLT_TEST = 9,
 	FC8050_SERVICE_MAX
 } fc8050_service_type;
 
@@ -156,6 +160,8 @@ fci_u8 msc_multi_data[188*8*8];
 	};
 #endif
 
+static uint16 is_tdmb_probe = 0;
+
 //static uint16 data_sequence_count = 0;
 /*============================================================
 **    8.   Local Function Prototype
@@ -173,6 +179,7 @@ int8 tunerbb_drv_fc8050_power_on(void)
 
 int8 tunerbb_drv_fc8050_power_off(void)
 {
+	is_tdmb_probe = 0;
 	return tdmb_fc8050_power_off();
 }
 
@@ -362,10 +369,16 @@ int8	tunerbb_drv_fc8050_init(void)
 	
 	res = BBM_INIT(NULL);
 	res |= BBM_PROBE(NULL);
-	
+//modify for TDMB BLT	
+#if 0	
+	if(res)
+		return FC8050_RESULT_ERROR;
+#endif
+
 	if(res)
 	{
-		printk("[FC8050] BBM_PROBE Error = (%d)\n", res);
+		is_tdmb_probe = 0;
+		printk("fc8050 chip id read error , so is_tdmb_probe = %d\n", is_tdmb_probe);
 		return FC8050_RESULT_ERROR;
 	}
 	else
@@ -376,6 +389,8 @@ int8	tunerbb_drv_fc8050_init(void)
 		memset((void*)&fic_buffer, 0x00, sizeof(DATA_BUFFER));
 #endif
 	}
+
+	is_tdmb_probe = 1;
 
 	res = BBM_TUNER_SELECT(0, FC8050_TUNER, BAND3_TYPE);
 
@@ -553,6 +568,17 @@ int8	tunerbb_drv_fc8050_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
 	uint16 nframe = 0;	
 
 	//fc8050_isr_control(0);
+
+	printk("is_tdmb_probe = %d in tunerbb_drv_fc8050_get_ber() \n", is_tdmb_probe);
+	if(is_tdmb_probe == 0)
+	{
+		dmb_bb_info->msc_ber = 20000;
+		dmb_bb_info->tp_err_cnt = 255;
+		
+		printk("is_tdmb_probe 0. so msc_ber is 20000, tp_err_cnt = 255. \n");
+		return FC8050_RESULT_SUCCESS;
+	}
+		
 
 	tunerbb_drv_fc8050_check_overrun(serviceType[0]);
 
@@ -765,6 +791,7 @@ int8	tunerbb_drv_fc8050_multi_set_channel(int32 freq_num, uint8 subch_cnt, uint8
 				break;
 			case FC8050_DMB:
 			case FC8050_VISUAL:
+			case FC8050_BLT_TEST:	
 				mask |= (1 << (DMB_SVC_ID+dmb_cnt));
 				if(dmb_cnt<2)
 				{

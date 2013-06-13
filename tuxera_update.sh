@@ -1,9 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 
 # ================= NO CHANGE NEEDED BELOW! =====================
-
-cache_dir=".tuxera_update_cache"
-script_version="12.8.9"
 
 usage() {
     usagestr=$(cat <<EOF
@@ -24,16 +21,38 @@ Usage: tuxera_update.sh [OPTION...]
       fails (some of the excluded files are needed). This significantly
       grows the headers package size.
 
-  -a [--target TARGET] [--user USER] [--pass PASSWD] [MODE] [OPTIONS]
+  --user USER [--pass PASSWD]
+      If remote connectivity is needed (-a or --latest), username and
+      password are required. If missing, they will be read from stdin.
+
+      NOTE: Using --pass can be dangerous as local users see it in 'ps'.
+
+  --use-cache [--cache-dir CACHEDIR] [--latest] [--max-cache-entries N]
+      Obtain modules from local cache if kernel dependencies are not
+      modified. You must provide --source-dir (optionally --output-dir) to
+      use the cache. Modules are relinked on cache hit, ensure the
+      toolchain is in PATH. If -a is specified, Autobuild is invoked
+      on a cache miss, and the cache is updated. Otherwise, kernel headers
+      assembly is performed for later, manual build.
+
+      You can specify a different cache directory with --cache-dir. The
+      default directory is \$PWD/.tuxera_update_cache
+
+      The --latest option will ensure that the release found in cache is
+      the latest version available on Autobuild servers. This needs remote
+      connectivity. If a new version is found and -a is specified,
+      Autobuild is invoked and the cache is updated.
+
+      The optional --max-cache-entries can be used to limit the maximum
+      cache size to N recently used entries. The default is 10.
+
+  -a [--target TARGET] [MODE] [OPTIONS]
 
       Start Autobuild against TARGET. If target was not specified, uses
       the default target. Use '--target list' to show available targets.
 
-      If --user or --pass is not specified, they will be read from stdin.
-      NOTE: Using --pass can be dangerous as local users see it in 'ps'.
-
-      Autobuild starts with .tar.bz2 assembly by default, but in MODE you
-      can optionally specify another operating mode:
+      Autobuild starts with fresh .tar.bz2 assembly by default, but in MODE
+      you can optionally specify another operating mode:
 
         --use-package PACKAGE
           Start Autobuild by uploading a pre-built .tar.bz2 file PACKAGE.
@@ -42,16 +61,6 @@ Usage: tuxera_update.sh [OPTION...]
           Start Autobuild with a previously uploaded .tar.bz2 file PACKAGE.
 
       The following extra options are supported:
-
-        --use-cache
-          Do not invoke a remote build if kernel dependencies are not
-          modified. Creates or updates the cache after a remote build.
-          You must provide --source-dir (optionally --output-dir) to
-          use the cache. Ensure the toolchain is in path.
-
-        --cache-dir CACHEDIR
-          Specify local cache directory. The default directory is
-          \$PWD/.tuxera_update_cache
 
         --ignore-cert
           If up/download fails due to certificate issues, this option can
@@ -66,9 +75,22 @@ Usage: tuxera_update.sh [OPTION...]
           Example: --version NTFS=3012.4.2,EXFAT=3012.4.9
           Specify the version of software component(s) to build.
 
+  -u, --upgrade
+
+      Upgrade online to the latest script version, obtained from
+      $upgrade_url
+
   -h, --help
 
       Prints this help.
+
+  -v
+
+      Only print the version of this script and exit.
+
+  --verbose
+
+      Print more debug information.
 
   Tuxera Autobuild Team
   autobuild-support@tuxera.com
@@ -91,49 +113,36 @@ build_package() {
         usage
     fi
 
-    # First make sure the Linux kernel source directory is set correctly. 
-    # To do so, let's check the COPYRIGHT file because that is always included.
-
-    # Let's guess if the paths are relative or absolute.
-    CUR_DIR="$(pwd)"
-    KERNEL_ABS=$(expr index $1 /)
-    OUTPUT_ABS=$(expr index $2 /)
-    # If the first character is '/', then the path is absolute.
-    if [ "${KERNEL_ABS}" = "1" ] ; then KERNEL_DIR="$1"; else KERNEL_DIR="${CUR_DIR}/$1"; fi
-    if [ "${OUTPUT_ABS}" = "1" ] ; then OUTPUT_DIR="$2"; else OUTPUT_DIR="${CUR_DIR}/$2"; fi
-
-    KERNEL_LINK=$(mktemp)
+    LINK_DIR=$(mktemp -d)
 
     if [ $? -ne 0 ] ; then
         echo "mktemp failed. Unable to continue."
         exit 1
     fi
 
-    ln -sf "${KERNEL_DIR}" "${KERNEL_LINK}"
+    KERNEL_LINK="${LINK_DIR}"/kernel
+    OUTPUT_LINK="${LINK_DIR}"/output
 
-    if [ ! -z "${OUTPUT_DIR}" ] ; then
-        OUTPUT_LINK=$(mktemp)
-
-        if [ $? -ne 0 ] ; then
-            echo "mktemp failed. Unable to continue."
-            rm -f "${KERNEL_LINK}"
-            exit 1
-        fi
-
-        ln -sf "${OUTPUT_DIR}" "${OUTPUT_LINK}"
-    fi
+    ln -sf "$(readlink -f "$1")" "${KERNEL_LINK}" && \
+        if [ -n "$2" ]; then ln -sf "$(readlink -f "$2")" "${OUTPUT_LINK}"; fi
 
     if [ $? -ne 0 ] ; then
         echo "Symlinking (ln -s) failed. Unable to continue."
-        rm -f "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm -f "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
+    fi
+
+    if [ "$1" = "$2" ] ; then
+        echo "  WARNING: You should not use the same --source-dir and --output-dir."
+        echo "           Will not use --output-dir. Please see the user manual."
+        rm "$OUTPUT_LINK"
     fi
 
     if test ! -e "${KERNEL_LINK}/COPYING"; then
         echo "  ERROR: Kernel source code directory is invalid (no COPYING found).";
         echo "         To fix it, set the --source-dir parameter correctly.";
 
-        rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
     fi
 
@@ -143,46 +152,18 @@ build_package() {
             echo "         To fix it run 'make oldconfig && make modules_prepare' and ";
             echo "         'make sure ARCH= and CROSS_COMPILE= are correctly set and exported.";
 
-        rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
     fi
 
-    if test -e "${KERNEL_LINK}/Module.symvers"; then
-        KSYMVERS=${KERNEL_LINK}/Module.symvers
-    fi
-    if test ! -z "${OUTPUT_LINK}" -a -e "${OUTPUT_LINK}/Module.symvers"; then
-        OSYMVERS=${OUTPUT_LINK}/Module.symvers
-    fi
-    if test ! -e "${KSYMVERS}" -a ! -e "${OSYMVERS}"; then
+    if test ! -e "${KERNEL_LINK}/Module.symvers" -a ! -e "${OUTPUT_LINK}/Module.symvers"; then
             echo "  ERROR: Invalid kernel configuration:";
             echo "         Module.symvers is missing.";
             echo "         To fix it run 'make oldconfig && make modules_prepare && make' and ";
             echo "         'make sure ARCH= and CROSS_COMPILE= are correctly set and exported.";
 
-        rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
-    fi
-
-    if test -e "${KERNEL_LINK}/.config"; then
-        KCONFIG=${KERNEL_LINK}/.config
-    fi
-
-    if test ! -z "${OUTPUT_LINK}"; then
-        if test -e "${OUTPUT_LINK}/.config"; then
-            OCONFIG=${OUTPUT_LINK}/.config
-        fi
-        if test -e "${OUTPUT_LINK}/Makefile"; then
-            OMAKEFILE=${OUTPUT_LINK}/Makefile
-        fi
-        if test -e "${OUTPUT_LINK}/scripts"; then
-            OSCRIPTS=${OUTPUT_LINK}/scripts
-        fi
-        if test -e "${OUTPUT_LINK}/arch"; then
-            OARCH=${OUTPUT_LINK}/arch
-        fi
-        if test -e "${OUTPUT_LINK}/include"; then
-            OINCLUDE=${OUTPUT_LINK}/include
-        fi
     fi
 
     echo "Generating list of files to include..."
@@ -190,40 +171,44 @@ build_package() {
 
     if [ $? -ne 0 ] ; then
         echo "mktemp failed. Unable to continue."
-        rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
     fi
 
     SEARCHPATHS="${KERNEL_LINK}/include ${KERNEL_LINK}/arch ${KERNEL_LINK}/scripts"
-    if [ ! -z "${OUTPUT_DIR}" ] ; then SEARCHPATHS="${SEARCHPATHS} ${OSCRIPTS} ${OARCH} ${OINCLUDE}"; fi
-
-    if [ -n "$no_excludes" ] ; then
-        find -L ${SEARCHPATHS} ! -type l >> ${INCLUDEFILE}
-    else
-        find -L ${SEARCHPATHS} \
-            \( ! -type l -a ! -name \*.c -a ! -name \*.o -a ! -name \*.S -a ! -path \*/arch/\*/boot/\* -a ! -path \*/.svn/\* -a ! -path \*/.git/\* \) \
-            >> ${INCLUDEFILE}
+    if [ -L "${OUTPUT_LINK}" ] ; then
+        SEARCHPATHS="${SEARCHPATHS} ${OUTPUT_LINK}/include ${OUTPUT_LINK}/arch ${OUTPUT_LINK}/scripts"
     fi
 
+    for P in ${SEARCHPATHS}; do
+        if [ ! -e ${P} ]; then continue; fi
+        if [ -n "$no_excludes" ] ; then
+            find -L ${P} ! -type l >> "${INCLUDEFILE}"
+        else
+            find -L ${P} \
+            \( ! -type l -a ! -name \*.c -a ! -name \*.o -a ! -name \*.S -a ! -path \*/arch/\*/boot/\* -a ! -path \*/.svn/\* -a ! -path \*/.git/\* \) \
+            >> ${INCLUDEFILE}
+        fi
+    done
+
     echo ${KERNEL_LINK}/Makefile >> ${INCLUDEFILE}
-    if [ -n "${KCONFIG}" ]; then echo ${KCONFIG} >> ${INCLUDEFILE}; fi
-    if [ -n "${KSYMVERS}" ]; then echo ${KSYMVERS} >> ${INCLUDEFILE}; fi
-    if [ -n "${OMAKEFILE}" ]; then echo ${OMAKEFILE} >> ${INCLUDEFILE}; fi
-    if [ -n "${OCONFIG}" ]; then echo ${OCONFIG} >> ${INCLUDEFILE}; fi
-    if [ -n "${OSYMVERS}" ]; then echo ${OSYMVERS} >> ${INCLUDEFILE}; fi
+    if [ -e "${OUTPUT_LINK}/Makefile" ]; then echo "${OUTPUT_LINK}/Makefile" >> ${INCLUDEFILE}; fi
+    if [ -e "${KERNEL_LINK}/Module.symvers" ]; then echo "${KERNEL_LINK}/Module.symvers" >> ${INCLUDEFILE}; fi
+    if [ -e "${OUTPUT_LINK}/Module.symvers" ]; then echo "${OUTPUT_LINK}/Module.symvers" >> ${INCLUDEFILE}; fi
+    if [ -e "${KERNEL_LINK}/.config" ]; then echo "${KERNEL_LINK}/.config" >> ${INCLUDEFILE}; fi
+    if [ -e "${OUTPUT_LINK}/.config" ]; then echo "${OUTPUT_LINK}/.config" >> ${INCLUDEFILE}; fi
 
     echo "Packing kernel headers ..."
     tar cjf "${3}" --dereference --no-recursion --files-from "${INCLUDEFILE}"
 
     if [ $? -ne 0 ] ; then
         echo "'tar cjf ${3} ...' failed. I will now exit."
-        rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
+        rm -rf "${LINK_DIR}"
         exit 1
     fi
 
     rm ${INCLUDEFILE}
-    rm "${KERNEL_LINK}"; if [ ! -z "${OUTPUT_DIR}" ] ; then rm "${OUTPUT_LINK}"; fi
-
+    rm -rf "${LINK_DIR}"
     echo "Headers package assembly succeeded. You could now use --use-package ${3}."
 }
 
@@ -231,10 +216,10 @@ upload_package_curl() {
     echo "Uploading the following package:"
     ls -lh "${1}"
 
-    reply=$($curl -F "file=@${1}" https://autobuild.tuxera.com/upload.php)
+    reply=$($curl -F "file=@${1}" https://${server}/upload.php)
 
     if [ $? -ne 0 ] ; then
-        echo "curl failed. Unable to continue."
+        echo "curl failed. Unable to continue. Check connectivity and username/password."
         exit 1
     fi
 
@@ -260,10 +245,11 @@ upload_package_sftp() {
         exit 1
     fi
 
-    $wget -O "$keyfile" https://autobuild.tuxera.com/id.php
+    $wget -O "$keyfile" https://${server}/id.php
 
     if [ $? -ne 0 ] ; then
         echo "Failed to download SFTP key. Unable to continue."
+        echo "Check connectivity and username/password."
         exit 1
     fi
 
@@ -272,8 +258,11 @@ upload_package_sftp() {
     echo "Uploading kheaders package:"
     ls -lh ${1}
 
-    echo "put \"${1}\" \"kernels/${1}\"" | sftp -oStrictHostKeyChecking=no -oIdentityFile="$keyfile" -b- "${username}\
-@autobuild.tuxera.com"
+    remote_package="$(basename ${1})"
+    sftp_path="kernels/${remote_package}"
+
+    printf "put \"${1}\" \"${sftp_path}\"\nchmod 0770 \"${sftp_path}\"" | \
+        sftp -oStrictHostKeyChecking=no -oIdentityFile="$keyfile" -b- "${username}@${server}"
 
     if [ $? -ne 0 ] ; then
         rm -f "$keyfile"
@@ -283,33 +272,25 @@ upload_package_sftp() {
 
     rm -f "$keyfile"
     echo "Upload succeeded. You could now use --use-remote-package ${1}."
-
-    remote_package="${1}"
 }
 
 calc_header_checksums() {
     DEPENDENCY=$(mktemp)
-    HEADERS=$(mktemp)
+
     if [ $? -ne 0 ] ; then
         echo "mktemp failed. Unable to continue."
-        rm -f "${HEADERS}" "${DEPENDENCY}"
         return 1
     fi
 
-    for i in "$1/.*.i.cmd"; do
-        egrep '.h[[:space:]]?\\$' $i >> $HEADERS
-    done
-
-    sort $HEADERS | uniq | sort | \
-        sed 's/\\$//g;s/^[[:space:]]*//g;s/^\$//g;s/^(wildcard//g;s/)[[:space:]]*$//g;s/^[[:space:]]*//g' > $DEPENDENCY
+    egrep '^#.*".*\.h".*' "$1"/*.i | awk -F '"' '{print $2}' | sort | uniq >> $DEPENDENCY
 
     if [ $? -ne 0 ] ; then
-        echo "Failed to sort dependency."
-        rm -f "${HEADERS}" "${DEPENDENCY}"
+        echo "Failed to extract dependencies."
+        rm -f "${DEPENDENCY}"
         return 1
     fi
 
-    rm -f "${HEADERS}" "$2"
+    rm -f "$2"
     dirlen=$(readlink -f "${source_dir}" | wc -c)
 
     while read line; do 
@@ -371,7 +352,7 @@ gen_header_checksums() {
         fi
     fi
 
-    make -C "$kernel" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE $CUST_KENV M="${cache_dir}/pkgtmp/dependency_mod" depmod.i 2>&1 > /dev/null
+    make -C "$kernel" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE $CUST_KENV M="${cache_dir}/pkgtmp/dependency_mod" depmod.i > $dbgdev
     
     if [ $? -ne 0 ] ; then
         echo "Compilation failed. Unable to compute header dependency tree."
@@ -402,20 +383,25 @@ check_symvers() {
     return $ret
 }
 
+destroy_cache_entry() {
+    echo "Destroying cache entry: ${1}"
+    rm "${cache_dir}/${pkg}".{pkg,md5sum,target,pkgname}
+}
+
 lookup_cache() {
     if [ ! -f "${kernel}/Module.symvers" ] ; then
         echo "${kernel}/Module.symvers does not exist. Unable to lookup cache."
         return 1
     fi
 
-    ls "${cache_dir}"/*.pkg >/dev/null 2>&1
+    cachefiles=$(cd "${cache_dir}"; ls -t *.pkg 2>/dev/null)
 
     if [ $? -ne 0 ] ; then
         echo "Can't find any cache files."
         return 1
     fi
 
-    for pkg in $(ls -t "${cache_dir}"/*.pkg) ; do
+    for pkg in ${cachefiles} ; do
         pkg=$(basename "$pkg" .pkg)
         echo -n "Cache lookup: ${pkg}.pkg ... "
 
@@ -426,6 +412,14 @@ lookup_cache() {
 
         if [ ! -f "${cache_dir}/${pkg}.md5sum" -o ! -f "${cache_dir}/${pkg}.pkgname" ] ; then
             echo "md5sum or pkgname file missing for ${cache_dir}/${pkg}, unable to validate"
+            continue
+        fi
+
+        pkgname=$(cat "${cache_dir}/${pkg}.pkgname")
+
+        if [ -n "$check_latest" -a "$pkgname" != "$latest_pkg" ] ; then
+            echo "Old cache entry: new version available"
+            [ -z "$autobuild" ] || destroy_cache_entry "old version"
             continue
         fi
 
@@ -458,14 +452,62 @@ lookup_cache() {
         fi
 
         rm -f "$tmpsums"
-        rm -rf "${cache_dir}/pkgtmp"
-        echo "hit!"
 
-        pkgname=$(cat "${cache_dir}/${pkg}.pkgname")
-        echo "Copying package to $pkgname"
-        cp "${cache_dir}/${pkg}.pkg" "$(pwd)/$pkgname"
+        echo "Cache hit! Relinking modules..."
+
+        if [ -z "$(find "${cache_dir}/pkgtmp/" -name \*.ko)" ] ; then
+            require_relink="yes"
+        fi
+
+        for driver_obj in "${cache_dir}/pkgtmp/"*/objects ; do
+            driver=$(dirname "$driver_obj")
+
+            if [ ! -f "${driver}/objects/Makefile.autobuild" ] ; then
+                echo "Old cache entry: no Makefile.autobuild found"
+                destroy_cache_entry "created by an old version"
+                rm -rf "${cache_dir}/pkgtmp"
+                continue 2
+            fi
+
+            rm -f "${driver}/objects/Kbuild"
+            mv "${driver}/objects/Makefile.autobuild" "${driver}/objects/Makefile"
+
+            make -C "$kernel" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE $CUST_KENV \
+                M="${driver}/objects" modules
+
+            if [ $? -ne 0 ] ; then
+                echo "Kernel module relinking failed - this usually shouldn't happen."
+                echo "Refusing to use this cache entry!"
+                rm -rf "${cache_dir}/pkgtmp"
+                continue 2
+            fi
+
+            echo "Stripping debug information..."
+
+            for mod in "${driver}"/objects/*.ko ; do
+                "${CROSS_COMPILE}strip" --strip-debug "${mod}" 1>/dev/null 2>/dev/null
+                cp "${mod}" "${driver}/kernel-module/"
+            done
+
+            relinked="yes"
+        done
+
+        if [ -n "$require_relink" -a -z "$relinked" ] ; then
+            echo "Old cache entry: no objects for relinking found"
+            destroy_cache_entry "created by an old version"
+            rm -rf "${cache_dir}/pkgtmp"
+            continue
+        fi
+
+        echo "Packaging ${pkgname}..."
+        pkgcontents=$(tar tf "${cache_dir}/${pkg}.pkg")
+        origname=$(echo "${pkgcontents}" | head -n 1 | awk -F '/' '{print $1}')
+        rm -rf "${cache_dir}/${origname}"
+        mv "${cache_dir}/pkgtmp" "${cache_dir}/${origname}"
+        tar czf "$(pwd)/${pkgname}" -C "${cache_dir}" "${origname}/"
+        rm -rf "${cache_dir}/${origname}"
+
         touch "${cache_dir}/${pkg}.pkg"
-
         return 0
     done
 
@@ -474,17 +516,17 @@ lookup_cache() {
 }
 
 do_remote_build() {
-    target_config="$target"
     echo "Starting remote build against target ${target}..."
 
     if [ "$http_client" = "wget" ] ; then
-        reply=$($wget --post-data="terminal=1&filename=${remote_package}&target-config=${target_config}&tags=${tags}&use-cache=${using_cache}&script-version=${script_version}&start-build=1" -O - https://autobuild.tuxera.com)
+        reply=$($wget --post-data="terminal=1&filename=${remote_package}&target-config=${target}&tags=${tags}&extraargs=${extraargs}&use-cache=${using_cache}&script-version=${script_version}&cache-lookup-time=${cache_lookup_time}&start-build=1" -O - https://${server})
     else
-        reply=$($curl -d terminal=1 -d filename="$remote_package" -d target-config="$target_config" -d tags="$tags" -d use-cache="$using_cache" -d script-version="$script_version" -d start-build=1 https://autobuild.tuxera.com)
+        reply=$($curl -d terminal=1 -d filename="$remote_package" -d target-config="$target" -d tags="$tags" -d extraargs="$extraargs" -d use-cache="$using_cache" -d script-version="$script_version" -d cache-lookup-time="$cache_lookup_time" -d start-build=1 https://${server})
     fi
 
     if [ $? -ne 0 ] ; then
         echo "${http_client} failed. Unable to start build."
+        echo "Check connectivity and username/password."
         exit 1
     fi
     
@@ -502,12 +544,12 @@ do_remote_build() {
     echo "Build started, id ${build_id}"
     echo "Polling for completion every 10 seconds..."
     
-    statusurl="https://autobuild.tuxera.com/builds/${build_id}/.status"
+    statusurl="https://${server}/builds/${build_id}/.status"
 
     while [ 1 ]
     do
         if [ "$http_client" = "wget" ] ; then
-            reply=$($wget -q -O - "$statusurl")
+            reply=$($wget_quiet -O - "$statusurl")
         else
             reply=$($curl_quiet "$statusurl")
         fi
@@ -532,14 +574,14 @@ do_remote_build() {
     fi
     
     filename=$(echo "$reply" | head -2 | tail -1)
-    fileurl="https://autobuild.tuxera.com/builds/${build_id}/${filename}"
+    fileurl="https://${server}/builds/${build_id}/${filename}"
     
     echo "Downloading ${filename} ..."
     
     if [ "$http_client" = "wget" ] ; then
-        $wget -q -O "$filename" "$fileurl"
+        $wget -O "$filename" "$fileurl"
     else
-        $curl -s -o "$filename" "$fileurl"
+        $curl -o "$filename" "$fileurl"
     fi
     
     if [ $? -ne 0 ] ; then
@@ -568,18 +610,27 @@ do_remote_build() {
         fi
 
         rm -rf "${cache_dir}/pkgtmp"
+
+        cachefiles=$(cd "${cache_dir}"; ls -t *.pkg 2>/dev/null | tail -n +$((${max_cache_entries}+1)))
+
+        for pkg in ${cachefiles} ; do
+            pkg=$(basename "$pkg" .pkg)
+            destroy_cache_entry "enforcing cache size limit"
+        done
     fi
 }
 
 list_targets() {
+    echo "Connecting..."
+
     if [ "$http_client" = "wget" ] ; then
-        reply=$($wget -O - https://autobuild.tuxera.com/targets.php)
+        reply=$($wget -O - https://${server}/targets.php)
     else
-        reply=$($curl https://autobuild.tuxera.com/targets.php)
+        reply=$($curl https://${server}/targets.php)
     fi
 
     if [ $? -ne 0 ] ; then
-        echo "Unable to list targets."
+        echo "Unable to list targets. Check connectivity and username/password."
         exit 1
     fi
 
@@ -589,12 +640,57 @@ list_targets() {
     echo
 }
 
+get_latest() {
+    echo "Checking for latest release..."
+
+    if [ "$http_client" = "wget" ] ; then
+        latest_pkg=$($wget --post-data="target-config=${target}" -O - https://${server}/latest.php)
+    else
+        latest_pkg=$($curl -d target-config="$target" https://${server}/latest.php)
+    fi
+
+    if [ $? -ne 0 ] ; then
+        echo "Unable to get latest release. Check connectivity and username/password."
+        exit 1
+    fi
+
+    if [ "$latest_pkg" = "FAIL" -o -z "$latest_pkg" ] ; then
+        echo "Unable to get latest release for this target."
+        echo "Use '-a --target list' to get valid targets."
+        exit 1
+    fi
+
+    echo "Latest release is ${latest_pkg}"
+}
+
 check_http_client() {
-    curl_quiet="curl -s -f -u ${username}:${password}"
-    wget="wget -nv --user ${username} --password ${password}"
+    while [ -z "$username" ] ; do
+        echo -n "Please enter your username: "
+        read username
+    done
+
+    while [ -z "$password" ] ; do
+        oldstty=$(stty -g)
+        echo -n "Please enter your password: "
+        stty -echo
+        read password
+        stty "$oldstty"
+        echo
+    done
+
+    curl_quiet="curl -f -u ${username}:${password}"
+    wget="wget --user ${username} --password ${password}"
+    wget_quiet=${wget}
+
+    if [ -z "${verbose}" ] ; then
+        curl_quiet=${curl_quiet}" -s"
+        wget_quiet=${wget_quiet}" -q"
+        wget=${wget}" -nv"
+    fi
     
     if [ -n "$ignore_certificates" ] ; then
         curl_quiet=${curl_quiet}" -k"
+        wget_quiet=${wget_quiet}" --no-check-certificate"
         wget=${wget}" --no-check-certificate"
     fi
 
@@ -643,7 +739,7 @@ check_cmds() {
 }
 
 check_autobuild_prerequisites() {
-    check_cmds date stty mktemp chmod tail expr head md5sum
+    check_cmds date stty mktemp chmod tail head md5sum basename
 
     if [ "$http_client" = "wget" ] ; then
         echo -n "Checking for 'sftp'... "
@@ -659,7 +755,8 @@ check_autobuild_prerequisites() {
     fi
 
     if [ -n "$use_cache" ] ; then
-        check_cmds egrep sed awk readlink basename touch uniq sort tr diff
+        check_cmds egrep sed awk touch uniq sort tr diff make \
+            dirname wc
 
         kernel="$source_dir"
 
@@ -669,20 +766,52 @@ check_autobuild_prerequisites() {
     fi
 }
 
+upgrade() {
+    check_http_client
+    check_cmds mktemp
+
+    tmpscript=$(mktemp)
+
+    if [ "$http_client" = "wget" ] ; then
+        $wget -O "$tmpscript" "$upgrade_url"
+    else
+        $curl -o "$tmpscript" "$upgrade_url"
+    fi
+
+    if [ $? -ne 0 ] ; then
+        echo "Upgrade failed."
+        exit 1
+    fi
+
+    mv "$tmpscript" "$0"
+
+    echo "Before upgrade: tuxera_update.sh version $script_version"
+    echo "After upgrade: $(sh $0 -v)"
+}
+
+script_version="12.11.27"
+cache_dir=".tuxera_update_cache"
+server="autobuild.tuxera.com"
+upgrade_url="https://$server/tuxera_update.sh"
+dbgdev="/dev/null"
+cache_lookup_time="none"
+max_cache_entries=10
+
 echo "tuxera_update.sh version $script_version"
 
-if ! options=$(getopt -u -o pah -l target:,user:,pass:,use-package:,use-remote-package:,source-dir:,output-dir:,version:,cache-dir:,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache -- "$@")
+if ! options=$(getopt -o pahuv -l target:,user:,pass:,use-package:,use-remote-package:,source-dir:,output-dir:,version:,cache-dir:,server:,extraargs:,max-cache-entries:,upgrade,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache,verbose,latest -- "$@")
 then
     usage
 fi
 
-set -- $options
+eval set -- "$options"
 
 while [ $# -gt 0 ]
 do
     case $1 in
     -p) pkgonly="yes" ;;
     -a) autobuild="yes" ;;
+    -v) exit 0 ;;
     --target) target="$2" ; shift;;
     --user) username="$2" ; shift;;
     --pass) password="$2" ; shift;;
@@ -695,10 +824,16 @@ do
     --use-wget) http_client="wget" ;;
     --use-curl) http_client="curl" ;;
     --version) tags="$2" ; shift;;
+    --extraargs) extraargs="$2" ; shift;;
     --no-excludes) no_excludes="yes" ;;
     --use-cache) use_cache="yes" ;;
     --cache-dir) cache_dir="$2" ; shift;;
+    --server) server="$2" ; shift;;
     --help | -h) long_help="yes"; usage;;
+    --upgrade | -u) do_upgrade="yes" ;;
+    --verbose) verbose="yes"; dbgdev="/dev/stdout" ;;
+    --latest) check_latest="yes" ;;
+    --max-cache-entries) max_cache_entries="$2" ; shift;;
     (--) shift; break;;
     (-*) echo "$0: error - unrecognized option $1" 1>&2; usage;;
     (*) break;;
@@ -706,67 +841,76 @@ do
     shift
 done
 
+if [ -n "$do_upgrade" ] ; then
+    upgrade
+    exit 0
+fi
+
 if [ -z "$target" ] ; then
     target="default"
 fi
 
-check_cmds tar find date grep
+check_cmds tar find grep readlink
 
-if [ -n "$autobuild" ] ; then
-    if [ -n "$pkgonly" ] ; then
-        echo "You cannot specify both -p and -a."
-        usage
-    fi
+if [ -n "$pkgonly" ] && [ -n "$autobuild" -o -n "$use_cache" ] ; then
+    echo "You cannot specify -p with -a or --use-cache."
+    usage
+fi
 
-    if [ -n "$local_package" -a -n "$remote_package" ] ; then
-        echo "You cannot specify both local and remote packages."
-        usage
-    fi
+if [ -n "$local_package" -a -n "$remote_package" ] ; then
+    echo "You cannot specify both local and remote packages."
+    usage
+fi
 
-    if [ -n "$local_package" -o -n "$remote_package" ] && [ -n "$use_cache" ] ; then
-        echo "You cannot specify --use-package/--use-remote-package with --use-cache."
-        usage
-    fi
+if [ -n "$local_package" -o -n "$remote_package" ] && [ -n "$use_cache" ] ; then
+    echo "You cannot specify --use-package/--use-remote-package with --use-cache."
+    usage
+fi
 
+if [ -n "$use_cache" -a "$target" != "list" ] ; then
     check_autobuild_prerequisites
 
-    if [ -n "$use_cache" -a "$target" != "list" ] ; then
-        mkdir -p "${cache_dir}"
-        cache_dir=$(readlink -f "$cache_dir")
+    mkdir -p "${cache_dir}"
+    cache_dir=$(readlink -f "$cache_dir")
 
-        if [ -z "$source_dir" ] ; then
-            echo "You must specify kernel source (optionally output) dir to use the cache."
-            usage
+    if [ $(echo $cache_dir | wc -w) != "1" ] ; then
+        echo "Linux build system does not support module paths with whitespace."
+        exit 1
+    fi
+
+    if [ -z "$source_dir" ] ; then
+        echo "You must specify kernel source (optionally output) dir to use the cache."
+        usage
+    fi
+
+    if [ -d "$cache_dir" ] ; then
+        if [ -n "$check_latest" ] ; then
+            check_http_client
+            get_latest
         fi
 
-        if [ -d "$cache_dir" ] ; then
-            lookup_cache
+        cache_lookup_start=$(date '+%s')
+        lookup_cache
 
-            if [ $? -eq 0 ] ; then
-                exit 0
-            else
-                echo "Proceeding with remote build..."
-            fi
+        if [ $? -eq 0 ] ; then
+            exit 0
         else
-            echo "Local cache does not exist; proceeding with remote build..."
+            cache_lookup_time=$(($(date '+%s') - $cache_lookup_start))
+
+            if [ -n "$autobuild" ] ; then
+                echo "Proceeding with remote build..."
+            else
+                echo "No cache hit found, assembling headers to kheaders.tar.bz2 for manual build..."
+            fi
         fi
+    else
+        echo "Local cache does not exist (yet)."
     fi
+fi
 
-    if [ -z "$username" ] ; then
-        echo -n "Please enter your username: "
-        read username
-    fi
-
-    if [ -z "$password" ] ; then
-        oldstty=$(stty -g)
-        echo -n "Please enter your password: "
-        stty -echo
-        read password
-        stty "$oldstty"
-        echo
-    fi
-
-    check_http_client
+if [ -n "$autobuild" ] ; then
+    [ -n "$use_cache" ] || check_autobuild_prerequisites
+    [ -n "$check_latest" ] || check_http_client
 
     if [ "$target" = "list" ] ; then
         list_targets
@@ -792,9 +936,8 @@ if [ -n "$autobuild" ] ; then
     fi
 
     do_remote_build "$remote_package"
-
-else
-    build_package "$source_dir" "$output_dir" "kheaders.tar.bz2"
+    exit 0
 fi
-    
+
+build_package "$source_dir" "$output_dir" "kheaders.tar.bz2"
 exit 0

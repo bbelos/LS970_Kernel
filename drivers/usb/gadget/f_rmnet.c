@@ -488,6 +488,8 @@ static void frmnet_suspend(struct usb_function *f)
 		break;
 	case USB_GADGET_XPORT_HSIC:
 		break;
+	case USB_GADGET_XPORT_HSUART:
+		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
 	default:
@@ -514,6 +516,8 @@ static void frmnet_resume(struct usb_function *f)
 		gbam_resume(&dev->port, port_num, dxport);
 		break;
 	case USB_GADGET_XPORT_HSIC:
+		break;
+	case USB_GADGET_XPORT_HSUART:
 		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
@@ -607,6 +611,7 @@ static void frmnet_ctrl_response_available(struct f_rmnet *dev)
 	struct usb_cdc_notification	*event;
 	unsigned long			flags;
 	int				ret;
+	struct rmnet_ctrl_pkt	*cpkt;
 
 	pr_debug("%s:dev:%p portno#%d\n", __func__, dev, dev->port_num);
 
@@ -633,6 +638,14 @@ static void frmnet_ctrl_response_available(struct f_rmnet *dev)
 	ret = usb_ep_queue(dev->notify, dev->notify_req, GFP_ATOMIC);
 	if (ret) {
 		atomic_dec(&dev->notify_count);
+		spin_lock_irqsave(&dev->lock, flags);
+		cpkt = list_first_entry(&dev->cpkt_resp_q,
+					struct rmnet_ctrl_pkt, list);
+		if (cpkt) {
+			list_del(&cpkt->list);
+			rmnet_free_ctrl_pkt(cpkt);
+		}
+		spin_unlock_irqrestore(&dev->lock, flags);
 		pr_debug("ep enqueue error %d\n", ret);
 	}
 }
@@ -768,6 +781,8 @@ static void frmnet_notify_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_rmnet *dev = req->context;
 	int status = req->status;
+	unsigned long		flags;
+	struct rmnet_ctrl_pkt	*cpkt;
 
 	pr_debug("%s: dev:%p port#%d\n", __func__, dev, dev->port_num);
 
@@ -790,6 +805,14 @@ static void frmnet_notify_complete(struct usb_ep *ep, struct usb_request *req)
 		status = usb_ep_queue(dev->notify, req, GFP_ATOMIC);
 		if (status) {
 			atomic_dec(&dev->notify_count);
+			spin_lock_irqsave(&dev->lock, flags);
+			cpkt = list_first_entry(&dev->cpkt_resp_q,
+						struct rmnet_ctrl_pkt, list);
+			if (cpkt) {
+				list_del(&cpkt->list);
+				rmnet_free_ctrl_pkt(cpkt);
+			}
+			spin_unlock_irqrestore(&dev->lock, flags);
 			pr_debug("ep enqueue error %d\n", status);
 		}
 		break;

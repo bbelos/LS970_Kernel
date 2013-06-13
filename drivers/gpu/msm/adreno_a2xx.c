@@ -12,6 +12,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/sched.h>
 #include <mach/socinfo.h>
 
 #include "kgsl.h"
@@ -1450,43 +1451,55 @@ done:
 }
 
 static void a2xx_drawctxt_draw_workaround(struct adreno_device *adreno_dev,
-						struct adreno_context *context)
+					struct adreno_context *context)
 {
 	struct kgsl_device *device = &adreno_dev->dev;
 	unsigned int cmd[11];
 	unsigned int *cmds = &cmd[0];
 
-	adreno_dev->gpudev->ctx_switches_since_last_draw++;
-	/* If there have been > than ADRENO_NUM_CTX_SWITCH_ALLOWED_BEFORE_DRAW
-	 * calls to context switches w/o gmem being saved then we need to
-	 * execute this workaround */
-	if (adreno_dev->gpudev->ctx_switches_since_last_draw >
-		ADRENO_NUM_CTX_SWITCH_ALLOWED_BEFORE_DRAW)
-		adreno_dev->gpudev->ctx_switches_since_last_draw = 0;
-	else
-		return;
-	/*
-	 * Issue an empty draw call to avoid possible hangs due to
-	 * repeated idles without intervening draw calls.
-	 * On adreno 225 the PC block has a cache that is only
-	 * flushed on draw calls and repeated idles can make it
-	 * overflow. The gmem save path contains draw calls so
-	 * this workaround isn't needed there.
-	 */
-	*cmds++ = cp_type3_packet(CP_SET_CONSTANT, 2);
-	*cmds++ = (0x4 << 16) | (REG_PA_SU_SC_MODE_CNTL - 0x2000);
-	*cmds++ = 0;
-	*cmds++ = cp_type3_packet(CP_DRAW_INDX, 5);
-	*cmds++ = 0;
-	*cmds++ = 1<<14;
-	*cmds++ = 0;
-	*cmds++ = device->mmu.setstate_memory.gpuaddr;
-	*cmds++ = 0;
-	*cmds++ = cp_type3_packet(CP_WAIT_FOR_IDLE, 1);
-	*cmds++ = 0x00000000;
+	if (adreno_is_a225(adreno_dev)) {
+		adreno_dev->gpudev->ctx_switches_since_last_draw++;
+		/* If there have been > than
+		 * ADRENO_NUM_CTX_SWITCH_ALLOWED_BEFORE_DRAW calls to context
+		 * switches w/o gmem being saved then we need to execute
+		 * this workaround */
+		if (adreno_dev->gpudev->ctx_switches_since_last_draw >
+				ADRENO_NUM_CTX_SWITCH_ALLOWED_BEFORE_DRAW)
+			adreno_dev->gpudev->ctx_switches_since_last_draw = 0;
+		else
+			return;
+		/*
+		 * Issue an empty draw call to avoid possible hangs due to
+		 * repeated idles without intervening draw calls.
+		 * On adreno 225 the PC block has a cache that is only
+		 * flushed on draw calls and repeated idles can make it
+		 * overflow. The gmem save path contains draw calls so
+		 * this workaround isn't needed there.
+		 */
+		*cmds++ = cp_type3_packet(CP_SET_CONSTANT, 2);
+		*cmds++ = (0x4 << 16) | (REG_PA_SU_SC_MODE_CNTL - 0x2000);
+		*cmds++ = 0;
+		*cmds++ = cp_type3_packet(CP_DRAW_INDX, 5);
+		*cmds++ = 0;
+		*cmds++ = 1<<14;
+		*cmds++ = 0;
+		*cmds++ = device->mmu.setstate_memory.gpuaddr;
+		*cmds++ = 0;
+		*cmds++ = cp_type3_packet(CP_WAIT_FOR_IDLE, 1);
+		*cmds++ = 0x00000000;
+	} else {
+		/* On Adreno 20x/220, if the events for shader space reuse
+		 * gets dropped, the CP block would wait indefinitely.
+		 * Sending CP_SET_SHADER_BASES packet unblocks the CP from
+		 * this wait.
+		 */
+		*cmds++ = cp_type3_packet(CP_SET_SHADER_BASES, 1);
+		*cmds++ = adreno_encode_istore_size(adreno_dev)
+					| adreno_dev->pix_shader_start;
+	}
 
 	adreno_ringbuffer_issuecmds(device, context, KGSL_CMD_FLAGS_PMODE,
-				    &cmd[0], 11);
+			&cmd[0], cmds - cmd);
 }
 
 static void a2xx_drawctxt_save(struct adreno_device *adreno_dev,
@@ -1494,7 +1507,7 @@ static void a2xx_drawctxt_save(struct adreno_device *adreno_dev,
 {
 	struct kgsl_device *device = &adreno_dev->dev;
 
-	if (context == NULL)
+	if (context == NULL || (context->flags & CTXT_FLAGS_BEING_DESTOYED))
 		return;
 
 	if (context->flags & CTXT_FLAGS_GPU_HANG)
@@ -1544,7 +1557,7 @@ static void a2xx_drawctxt_save(struct adreno_device *adreno_dev,
 		adreno_dev->gpudev->ctx_switches_since_last_draw = 0;
 
 		context->flags |= CTXT_FLAGS_GMEM_RESTORE;
-	} else if (adreno_is_a225(adreno_dev))
+	} else if (adreno_is_a2xx(adreno_dev))
 		a2xx_drawctxt_draw_workaround(adreno_dev, context);
 }
 
@@ -1706,7 +1719,6 @@ static void a2xx_cp_intrcallback(struct kgsl_device *device)
 			kgsl_sharedmem_writel(&rb->device->memstore,
 					KGSL_MEMSTORE_OFFSET(context_id,
 						ts_cmp_enable), 0);
-			device->last_expired_ctxt_id = context_id;
 			wmb();
 		}
 		KGSL_CMD_WARN(rb->device, "ringbuffer rb interrupt\n");
@@ -1828,7 +1840,7 @@ static void a2xx_rb_init(struct adreno_device *adreno_dev,
 	unsigned int *cmds, cmds_gpu;
 
 	/* ME_INIT */
-	cmds = adreno_ringbuffer_allocspace(rb, 19);
+	cmds = adreno_ringbuffer_allocspace(rb, NULL, 19);
 	cmds_gpu = rb->buffer_desc.gpuaddr + sizeof(uint)*(rb->wptr-19);
 
 	GSL_RB_WRITE(cmds, cmds_gpu, cp_type3_packet(CP_ME_INIT, 18));
@@ -1971,7 +1983,13 @@ static void a2xx_start(struct adreno_device *adreno_dev)
 			0x18000000);
 	}
 
-	adreno_regwrite(device, REG_RBBM_CNTL, 0x00004442);
+	if (adreno_is_a20x(adreno_dev))
+		/* For A20X based targets increase number of clocks
+		 * that RBBM will wait before de-asserting Register
+		 * Clock Active signal */
+		adreno_regwrite(device, REG_RBBM_CNTL, 0x0000FFFF);
+	else
+		adreno_regwrite(device, REG_RBBM_CNTL, 0x00004442);
 
 	adreno_regwrite(device, REG_SQ_VS_PROGRAM, 0x00000000);
 	adreno_regwrite(device, REG_SQ_PS_PROGRAM, 0x00000000);

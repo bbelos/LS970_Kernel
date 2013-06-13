@@ -700,7 +700,7 @@ typedef enum
 #define YES                         1
 #define NO                          0
 
-#define MHL_PART_NAME "Sil-833x"	// WARNING! Must match I2C_BOARD_INFO() setting in board-omap3beagle.c
+#define MHL_PART_NAME "SiI-833x"	// WARNING! Must match I2C_BOARD_INFO() setting in board-omap3beagle.c
 #define MHL_DRIVER_NAME "simg8334"
 #define MHL_DRIVER_DESC "Sil-8334 MHL Tx Driver"
 #define MHL_DEVICE_NAME "siI-8334"

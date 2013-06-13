@@ -20,6 +20,7 @@ enum mmc_blk_status {
 	MMC_BLK_ABORT,
 	MMC_BLK_DATA_ERR,
 	MMC_BLK_ECC_ERR,
+	MMC_BLK_NOMEDIUM,
 };
 
 enum mmc_packed_cmd {
@@ -39,6 +40,7 @@ struct mmc_queue_req {
 	u32			packed_cmd_hdr[128];
 	unsigned int		packed_blocks;
 	enum mmc_packed_cmd	packed_cmd;
+	int		packed_retries;
 	int		packed_fail_idx;
 	u8		packed_num;
 };

@@ -104,7 +104,7 @@ int felica_i2c_set_slave_address (unsigned char slave_address)
 }
 
 /*
-* Description : 
+* Description :
 * Input :
 * Output :
 */
@@ -112,10 +112,27 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
 {
   ssize_t rc = 0;
   mm_segment_t old_fs = get_fs();
+  int retry = 10;
 
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_I2C] felica_i2c_read\n");
   #endif
+
+//  while((I2C_STATUS_NO_USE != get_felica_i2c_status())&&(retry > 0))
+  while((I2C_STATUS_FOR_NFC == get_felica_i2c_status())&&(retry > 0))
+  {
+    usleep(100);
+    retry--;
+  }
+
+//  if(I2C_STATUS_NO_USE != get_felica_i2c_status())
+  if(I2C_STATUS_FOR_NFC == get_felica_i2c_status())
+  {
+    FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - other device(NFC) use i2c abnormally \n");
+    return rc;
+  }
+
+  set_felica_i2c_status(I2C_STATUS_FOR_FELICA);
 
   set_fs(KERNEL_DS);
 
@@ -124,7 +141,7 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_open : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* Set slave address */
@@ -132,7 +149,7 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_set_slave_address : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* set register address */
@@ -140,7 +157,7 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
   if (rc < 0)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - sys_write : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* read register data */
@@ -149,11 +166,11 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_I2C] read data : 0x%02x \n",*buf);
   #endif
-  
+
   if (rc < 0)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - sys_read : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* release i2c */
@@ -161,11 +178,20 @@ int felica_i2c_read(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_release : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   set_fs(old_fs);
+  
+//  set_felica_i2c_status(I2C_STATUS_NO_USE);
+  set_felica_i2c_status(I2C_STATUS_READY);
+  
   return 0;
+
+  ERROR:
+//    set_felica_i2c_status(I2C_STATUS_NO_USE);
+    set_felica_i2c_status(I2C_STATUS_READY);
+    return rc;
 }
 
 /*
@@ -178,10 +204,27 @@ int felica_i2c_write(unsigned char reg, unsigned char *buf, size_t count)
   ssize_t rc = 0;
   unsigned char write_buf[2];
   mm_segment_t old_fs = get_fs();
+  int retry = 10;
 
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_I2C] felica_i2c_write\n");
   #endif
+
+ // while((I2C_STATUS_NO_USE != get_felica_i2c_status())&&(retry > 0))
+  while((I2C_STATUS_FOR_NFC == get_felica_i2c_status())&&(retry > 0))  
+  {
+    usleep(100);
+    retry--;
+  }
+
+//  if(I2C_STATUS_NO_USE != get_felica_i2c_status())
+  if(I2C_STATUS_FOR_NFC == get_felica_i2c_status())
+  {
+    FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - other device(NFC) use i2c abnormally \n");
+    return rc;
+  }
+
+  set_felica_i2c_status(I2C_STATUS_FOR_FELICA);
 
   set_fs(KERNEL_DS);
 
@@ -190,7 +233,7 @@ int felica_i2c_write(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_open : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* set slave address */
@@ -198,7 +241,7 @@ int felica_i2c_write(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_set_slave_address : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* set register  */
@@ -215,7 +258,7 @@ int felica_i2c_write(unsigned char reg, unsigned char *buf, size_t count)
   if (rc < 0)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - sys_write : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   /* release i2c */
@@ -223,10 +266,18 @@ int felica_i2c_write(unsigned char reg, unsigned char *buf, size_t count)
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_I2C] ERROR - felica_i2c_release : %d \n",rc);
-    return rc;
+    goto ERROR;
   }
 
   set_fs(old_fs);
 
+//  set_felica_i2c_status(I2C_STATUS_NO_USE);
+  set_felica_i2c_status(I2C_STATUS_READY);
+  
   return 0;
+
+  ERROR:
+//    set_felica_i2c_status(I2C_STATUS_NO_USE);
+    set_felica_i2c_status(I2C_STATUS_READY);    
+    return rc;
 }

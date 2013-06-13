@@ -15,6 +15,14 @@
 /*
  *	DEFINE
  */
+	
+typedef enum _e_snfc_i2c_status {
+	I2C_STATUS_NO_USE = 0,
+	I2C_STATUS_READY,
+	I2C_STATUS_FOR_FELICA,
+	I2C_STATUS_FOR_NFC,
+	I2C_STATUS_NONE,
+} _e_snfc_i2c_status;
 
 /*
  *	FUNCTION PROTOTYPE

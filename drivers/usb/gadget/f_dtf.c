@@ -309,16 +309,28 @@ static int dtf_if_close( struct inode *pinode, struct file *pfile )
 static ssize_t dtf_if_read( struct file *pfile, char *pbuf, size_t count, loff_t *ppos )
 {
 	struct dtf_if_read_data *read_data;
-	
+/* MSE-ADD-S for GV(Docomo) No.3-7 */
+    unsigned long   flags;
+/* MSE-ADD-E for GV(Docomo) No.3-7 */
+
 	_dbgmsg_if( "IN\n" );
 
+/* MSE-ADD-S for GV(Docomo) No.3-20, 3-7 */
+    spin_lock_irqsave(&lock_read_data, flags);
+/* MSE-ADD-E for GV(Docomo) No.3-20, 3-7 */
 	read_data = dtf_if_get_read_data();
 	if ( copy_to_user((void*)pbuf, read_data, sizeof(struct dtf_if_read_data)) )
 	{
 		_dbgmsg_if( "copy_to_user error\n" );
+/* MSE-ADD-S for GV(Docomo) No.3-20, 3-7 */
+        spin_unlock_irqrestore(&lock_read_data, flags);
+/* MSE-ADD-E for GV(Docomo) No.3-20, 3-7 */
 	    return -EFAULT;
 	}
 	_dbgmsg_if( "OUT\n" );
+/* MSE-ADD-S for GV(Docomo) No.3-20, 3-7 */
+    spin_unlock_irqrestore(&lock_read_data, flags);
+/* MSE-ADD-E for GV(Docomo) No.3-20, 3-7 */
 	return 0;
 }
 static ssize_t dtf_if_write( struct file *pfile, const char *pbuf, size_t count, loff_t *ppos )
@@ -509,6 +521,9 @@ static int dtf_allocate_endpoints(struct usb_configuration *c, struct usb_functi
 	req = dtf_request_new( dev->pg.ep_in, 512 );
 	if(!req) {
 		_dbgmsg( "create request error\n" );
+/* MSE-ADD-S for GV(Docomo) No.3-19 */
+        dtf_request_free(dev->pg.mReq_intr, dev->pg.ep_intr);
+/* MSE-ADD-E for GV(Docomo) No.3-19 */
 		return -ENODEV;
 	}
 	req->complete = dtf_complete_in;
@@ -517,6 +532,10 @@ static int dtf_allocate_endpoints(struct usb_configuration *c, struct usb_functi
 	req = dtf_request_new( dev->pg.ep_out, 512 );
 	if(!req) {
 		_dbgmsg( "create request error\n" );
+/* MSE-ADD-S for GV(Docomo) No.3-19 */
+        dtf_request_free(dev->pg.mReq_intr, dev->pg.ep_intr);
+        dtf_request_free(dev->pg.mReq_in, dev->pg.ep_in);
+/* MSE-ADD-E for GV(Docomo) No.3-19 */
 		return -ENODEV;
 	}
 	req->complete = dtf_complete_out;
@@ -834,14 +853,22 @@ static void dtf_function_suspend(struct usb_function *f)
 static void dtf_function_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct dtf_dev *dev = func_to_dtf(f);
-
+/* MSE-ADD-S for GV(Docomo) No.3-7 */
+    unsigned long   flags;
+/* MSE-ADD-E for GV(Docomo) No.3-7 */
 	_dbgmsg( "IN\n" );
 
-	spin_lock_irq(&dev->lock);
+/* MSE-MOD-S for GV(Docomo) No.3-7 */
+//    spin_lock_irq(&dev->lock);
+    spin_lock_irqsave(&dev->lock, flags);
+/* MSE-MOD-E for GV(Docomo) No.3-7 */
 	dtf_request_free( dev->pg.mReq_intr, dev->pg.ep_intr );
 	dtf_request_free( dev->pg.mReq_in, dev->pg.ep_in );
 	dtf_request_free( dev->pg.mReq_out, dev->pg.ep_out );
-	spin_unlock_irq(&dev->lock);
+/* MSE-MOD-S for GV(Docomo) No.3-7 */
+//    spin_unlock_irq(&dev->lock);
+    spin_unlock_irqrestore(&dev->lock, flags);
+/* MSE-MOD-E for GV(Docomo) No.3-7 */
 
 	_dbgmsg( "OUT\n" );
 }
@@ -1292,13 +1319,25 @@ static void dtf_if_init_read_data(void)
 
 static void dtf_if_add_read_data(struct dtf_if_read_data *read_data)
 {
+/* MSE-ADD-S for GV(Docomo) No.3-7 */
+    unsigned long   flags;
+/* MSE-ADD-E for GV(Docomo) No.3-7 */
 	_dbgmsg_if( "IN(%d)\n", read_data->event_id );
+
+/* MSE-ADD-S for GV(Docomo) No.3-22, 3-7 */
+    spin_lock_irqsave(&lock_read_data, flags);
+/* MSE-ADD-E for GV(Docomo) No.3-22, 3-7 */
 	if ( dtf_if_readable_num >= DTF_IF_READ_DATA_MAX )
 	{
 		_dbgmsg_if( "Buffer over flow\n" );
+/* MSE-ADD-S for GV(Docomo) No.3-22, 3-7 */
+        spin_unlock_irqrestore(&lock_read_data, flags);
+/* MSE-ADD-E for GV(Docomo) No.3-22, 3-7 */
 		return;
 	}
-	spin_lock_irq(&lock_read_data);
+/* MSE-DEL-S for GV(Docomo) No.3-22 */
+//    spin_lock_irq(&lock_read_data);
+/* MSE-DEL-E for GV(Docomo) No.3-22 */
 	dtf_if_readable_num++;
 	_dbgmsg_if( "dtf_if_readable_num: %d\n", dtf_if_readable_num );
 	_dbgmsg_if( "event_id: %d\n", read_data->event_id );
@@ -1309,7 +1348,10 @@ static void dtf_if_add_read_data(struct dtf_if_read_data *read_data)
 	{
 		dtf_if_readable_tail = 0;
 	}
-	spin_unlock_irq(&lock_read_data);
+/* MSE-MOD-S for GV(Docomo) No.3-7 */
+//    spin_unlock_irq(&lock_read_data);
+    spin_unlock_irqrestore(&lock_read_data, flags);
+/* MSE-MOD-E for GV(Docomo) No. */
 	_dbgmsg_if( "OUT\n" );
 }
 
@@ -1319,7 +1361,9 @@ static struct dtf_if_read_data *dtf_if_get_read_data(void)
 
 	_dbgmsg_if( "IN\n" );
 
-	spin_lock_irq(&lock_read_data);
+/* MSE-DEL-S for GV(Docomo) No.3-20 */
+//    spin_lock_irq(&lock_read_data);
+/* MSE-DEL-E for GV(Docomo) No.3-20 */
 	read_data = &dtf_read_data[dtf_if_readable_head];
 	dtf_if_readable_head++;
 	if ( dtf_if_readable_head >= DTF_IF_READ_DATA_MAX )
@@ -1327,7 +1371,9 @@ static struct dtf_if_read_data *dtf_if_get_read_data(void)
 		dtf_if_readable_head = 0;
 	}
 	dtf_if_readable_num--;
-	spin_unlock_irq(&lock_read_data);
+/* MSE-DEL-S for GV(Docomo) No.3-20 */
+//    spin_unlock_irq(&lock_read_data);
+/* MSE-DEL-E for GV(Docomo) No.3-20 */
 
 	_dbgmsg_if( "dtf_if_readable_num: %d\n", dtf_if_readable_num );
 	_dbgmsg_if( "event_id: %d\n", read_data->event_id );

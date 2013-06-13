@@ -26,6 +26,7 @@
 */
 
 #include <linux/module.h>
+#include <linux/interrupt.h>
 
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -55,13 +56,12 @@
 #include "bnep.h"
 
 #define VERSION "1.3"
-
-//+s QCT_BT_COMMON_BUGFIX_BNEP_FAIL_WITH_MOTOROLA_MODULE - Disabling the FILTER_MULTI_ADDR_SET packet for Bluetooth Tethering. [jaeeun.pyo@lge.com] 2012.08.23
+/* As this feature is dummy for BNEP net device
+** disabling support */
 #undef CONFIG_BT_BNEP_MC_FILTER
-//+e QCT_BT_COMMON_BUGFIX_BNEP_FAIL_WITH_MOTOROLA_MODULE
 
-static int compress_src = 1;
-static int compress_dst = 1;
+static bool compress_src = 1;
+static bool compress_dst = 1;
 
 static LIST_HEAD(bnep_session_list);
 static DECLARE_RWSEM(bnep_session_sem);

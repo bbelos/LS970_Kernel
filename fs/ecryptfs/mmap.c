@@ -57,16 +57,14 @@ struct page *ecryptfs_get_locked_page(struct inode *inode, loff_t index)
  * @page: Page that is locked before this call is made
  *
  * Returns zero on success; non-zero otherwise
+ *
+ * This is where we encrypt the data and pass the encrypted data to
+ * the lower filesystem.  In OpenPGP-compatible mode, we operate on
+ * entire underlying packets.
  */
 static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int rc;
-#if 1 // FEATURE_SDCARD_ENCRYPTION dongjune.kim@lge.com
-	struct inode *ecryptfs_inode;
-	struct ecryptfs_crypt_stat *crypt_stat =
-		&ecryptfs_inode_to_private(page->mapping->host)->crypt_stat;
-	ecryptfs_inode = page->mapping->host;
-#endif
 
 	/*
 	 * Refuse to write the page out if we are called from reclaim context
@@ -80,18 +78,6 @@ static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 		goto out;
 	}
 
-#if 1 // FEATURE_SDCARD_ENCRYPTION dongjune.kim@lge.com
-	if (!crypt_stat || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
-		ecryptfs_printk(KERN_DEBUG,
-				"Passing through unencrypted page\n");
-		rc = ecryptfs_write_lower_page_segment(ecryptfs_inode, page,
-			0, PAGE_CACHE_SIZE);
-		if (rc) {
-			ClearPageUptodate(page);
-			goto out;
-		}
-		SetPageUptodate(page);
-	} else {
 	rc = ecryptfs_encrypt_page(page);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error encrypting "
@@ -100,17 +86,6 @@ static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 		goto out;
 	}
 	SetPageUptodate(page);
-	}
-#else
-	rc = ecryptfs_encrypt_page(page);
-	if (rc) {
-		ecryptfs_printk(KERN_WARNING, "Error encrypting "
-				"page (upper index [0x%.16lx])\n", page->index);
-		ClearPageUptodate(page);
-		goto out;
-	}
-	SetPageUptodate(page);
-#endif
 out:
 	unlock_page(page);
 	return rc;
@@ -175,7 +150,7 @@ ecryptfs_copy_up_encrypted_with_header(struct page *page,
 			/* This is a header extent */
 			char *page_virt;
 
-			page_virt = kmap_atomic(page, KM_USER0);
+			page_virt = kmap_atomic(page);
 			memset(page_virt, 0, PAGE_CACHE_SIZE);
 			/* TODO: Support more than one header extent */
 			if (view_extent_num == 0) {
@@ -188,7 +163,7 @@ ecryptfs_copy_up_encrypted_with_header(struct page *page,
 							       crypt_stat,
 							       &written);
 			}
-			kunmap_atomic(page_virt, KM_USER0);
+			kunmap_atomic(page_virt);
 			flush_dcache_page(page);
 			if (rc) {
 				printk(KERN_ERR "%s: Error reading xattr "
@@ -510,10 +485,6 @@ int ecryptfs_write_inode_size_to_metadata(struct inode *ecryptfs_inode)
  * @copied: The amount of data copied
  * @page: The eCryptfs page
  * @fsdata: The fsdata (unused)
- *
- * This is where we encrypt the data and pass the encrypted data to
- * the lower filesystem.  In OpenPGP-compatible mode, we operate on
- * entire underlying packets.
  */
 static int ecryptfs_write_end(struct file *file,
 			struct address_space *mapping,

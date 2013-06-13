@@ -408,6 +408,7 @@ static struct msm_sensor_output_info_t imx091_dimensions[] = {
 	},
 };
 
+#if 0 // Move to Userspace
 static struct msm_camera_csid_vc_cfg imx091_cid_cfg[] = {
 	{0, CSI_RAW10, CSI_DECODE_10BIT},
 	{1, CSI_EMBED_DATA, CSI_DECODE_8BIT},
@@ -434,6 +435,7 @@ static struct msm_camera_csi2_params *imx091_csi_params_array[] = {
 	&imx091_csi_params,
 	&imx091_csi_params,
 };
+#endif
 
 static struct msm_sensor_output_reg_addr_t imx091_reg_addr = {
 	.x_output = 0x034C,
@@ -442,10 +444,29 @@ static struct msm_sensor_output_reg_addr_t imx091_reg_addr = {
 	.frame_length_lines = 0x0340,
 };
 
+/* LGE_CHANGE_S, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
+
 static struct msm_sensor_id_info_t imx091_id_info = {
 	.sensor_id_reg_addr = 0x0000,
 	.sensor_id = 0x0091,
 };
+
+static enum msm_camera_vreg_name_t imx091_veg_seq[] = {
+	CAM_VANA,
+	CAM_VDIG,
+	CAM_VIO,
+	CAM_VAF,
+};
+
+static struct msm_camera_power_seq_t imx091_power_seq[] = {
+	{REQUEST_GPIO, 0},
+	{REQUEST_VREG, 0},
+	{ENABLE_VREG, 0},
+	{ENABLE_GPIO, 0},
+	{CONFIG_CLK, 1},
+	{CONFIG_I2C_MUX, 0},
+};
+/* LGE_CHANGE_E, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
 
 static struct msm_sensor_exp_gain_info_t imx091_exp_gain_info = {
 	.coarse_int_time_addr = 0x0202,
@@ -471,10 +492,13 @@ static struct msm_camera_i2c_client imx091_sensor_i2c_client = {
 };
 
 
-static int __init imx091_sensor_init_module(void)
+/* LGE_CHANGE_S, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
+static int __init msm_sensor_init_module(void)
 {
+	pr_err("__jrchoi: %s: E\n", __func__);
 	return i2c_add_driver(&imx091_i2c_driver);
 }
+/* LGE_CHANGE_E, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
 
 static struct v4l2_subdev_core_ops imx091_subdev_core_ops = {
 	.ioctl = msm_sensor_subdev_ioctl,
@@ -496,11 +520,12 @@ int32_t imx091_sensor_setting(struct msm_sensor_ctrl_t *s_ctrl,
 {
 	int32_t rc = 0;
 
-	s_ctrl->func_tbl->sensor_stop_stream(s_ctrl);
-	msleep(30);
-	pr_err("[rafal47]update: %d, res : %d, %s: csi_lane_assign not setting\n", update_type, res, __func__);
+//	s_ctrl->func_tbl->sensor_stop_stream(s_ctrl);
+//	msleep(30);
+
+	pr_err("[rafal47] %s: update: %d, res : %d : Change camera mode\n", __func__, update_type, res);
 	if (update_type == MSM_SENSOR_REG_INIT) {
-		s_ctrl->curr_csi_params = NULL;
+//		s_ctrl->curr_csi_params = NULL;
 		msm_sensor_enable_debugfs(s_ctrl);
 		msm_sensor_write_init_settings(s_ctrl);
 	} else if (update_type == MSM_SENSOR_UPDATE_PERIODIC) {
@@ -512,7 +537,7 @@ int32_t imx091_sensor_setting(struct msm_sensor_ctrl_t *s_ctrl,
 				imx091_comm_confs[0].data_type);
 		} else {
 			msm_sensor_write_res_settings(s_ctrl, res);
-			if (s_ctrl->curr_csi_params != s_ctrl->csi_params[res]) {
+/*			if (s_ctrl->curr_csi_params != s_ctrl->csi_params[res]) {
 				s_ctrl->curr_csi_params = s_ctrl->csi_params[res];
 				s_ctrl->curr_csi_params->csid_params.lane_assign =
 					s_ctrl->sensordata->sensor_platform_info->
@@ -530,12 +555,12 @@ int32_t imx091_sensor_setting(struct msm_sensor_ctrl_t *s_ctrl,
 				mb();
 				msleep(20);
 			}
-
+*/
 			v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
 				NOTIFY_PCLK_CHANGE, &s_ctrl->msm_sensor_reg->
 				output_settings[res].op_pixel_clk);
-			s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
-			msleep(30);
+//			s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
+//			msleep(30);
 		}
 	}
 	pr_err("%s: X", __func__);
@@ -606,7 +631,7 @@ int32_t imx091_sensor_write_exp_gain1(struct msm_sensor_ctrl_t *s_ctrl,
 			imx091_comm_confs[2].size,
 			imx091_comm_confs[2].data_type);
 
-		if (s_ctrl->curr_csi_params !=
+/*		if (s_ctrl->curr_csi_params !=
 			s_ctrl->csi_params[s_ctrl->curr_res]) {
 			s_ctrl->curr_csi_params =
 				s_ctrl->csi_params[s_ctrl->curr_res];
@@ -620,11 +645,11 @@ int32_t imx091_sensor_write_exp_gain1(struct msm_sensor_ctrl_t *s_ctrl,
 			mb();
 			msleep(20);
 		}
-
+*/
 		v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
 			NOTIFY_PCLK_CHANGE, &s_ctrl->msm_sensor_reg->
 			output_settings[s_ctrl->curr_res].op_pixel_clk);
-		s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
+		//s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
 	} else {
 		s_ctrl->func_tbl->sensor_group_hold_on(s_ctrl);
 		msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
@@ -698,20 +723,28 @@ static struct msm_sensor_ctrl_t imx091_s_ctrl = {
 	.msm_sensor_reg = &imx091_regs,
 	.sensor_i2c_client = &imx091_sensor_i2c_client,
 	.sensor_i2c_addr = 0x34,
+	.vreg_seq = imx091_veg_seq,
+	.num_vreg_seq = ARRAY_SIZE(imx091_veg_seq),
 	.sensor_output_reg_addr = &imx091_reg_addr,
+/* LGE_CHANGE_S, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
+	.power_seq = &imx091_power_seq[0],
+	.num_power_seq = ARRAY_SIZE(imx091_power_seq),
+/* LGE_CHANGE_E, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
 	.sensor_id_info = &imx091_id_info,
 	.sensor_exp_gain_info = &imx091_exp_gain_info,
 	.cam_mode = MSM_SENSOR_MODE_INVALID,
-	.csi_params = &imx091_csi_params_array[0],
+//	.csi_params = &imx091_csi_params_array[0],
 	.msm_sensor_mutex = &imx091_mut,
 	.sensor_i2c_driver = &imx091_i2c_driver,
 	.sensor_v4l2_subdev_info = imx091_subdev_info,
 	.sensor_v4l2_subdev_info_size = ARRAY_SIZE(imx091_subdev_info),
 	.sensor_v4l2_subdev_ops = &imx091_subdev_ops,
 	.func_tbl = &imx091_func_tbl,
-	.clk_rate = MSM_SENSOR_MCLK_24HZ,
+//	.clk_rate = MSM_SENSOR_MCLK_24HZ,
 };
 
-module_init(imx091_sensor_init_module);
+/* LGE_CHANGE_S, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
+module_init(msm_sensor_init_module);
+/* LGE_CHANGE_E, Code refining for Jelly bean from G-MR ver. , 2012.11.03 youngwook.song */
 MODULE_DESCRIPTION("Sony 13MP Bayer sensor driver");
 MODULE_LICENSE("GPL v2");

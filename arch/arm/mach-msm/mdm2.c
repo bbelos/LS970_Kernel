@@ -53,7 +53,6 @@ static int power_on_count;
 static int hsic_peripheral_status;
 static DEFINE_MUTEX(hsic_status_lock);
 
-
 static void mdm_peripheral_connect(struct mdm_modem_drv *mdm_drv)
 {
 	if (!mdm_drv->pdata->peripheral_platform_device)
@@ -82,6 +81,7 @@ out:
 	mutex_unlock(&hsic_status_lock);
 }
 
+/* This function can be called from atomic context. */
 static void mdm_toggle_soft_reset(struct mdm_modem_drv *mdm_drv)
 {
 	int soft_reset_direction_assert = 0,
@@ -93,9 +93,18 @@ static void mdm_toggle_soft_reset(struct mdm_modem_drv *mdm_drv)
 	}
 	gpio_direction_output(mdm_drv->ap2mdm_soft_reset_gpio,
 			soft_reset_direction_assert);
-	usleep_range(5000, 10000);
+	/* Use mdelay because this function can be called from atomic
+	 * context.
+	 */
+	mdelay(10);
 	gpio_direction_output(mdm_drv->ap2mdm_soft_reset_gpio,
 			soft_reset_direction_de_assert);
+}
+
+/* This function can be called from atomic context. */
+static void mdm_atomic_soft_reset(struct mdm_modem_drv *mdm_drv)
+{
+	mdm_toggle_soft_reset(mdm_drv);
 }
 
 static void mdm_power_down_common(struct mdm_modem_drv *mdm_drv)
@@ -104,10 +113,16 @@ static void mdm_power_down_common(struct mdm_modem_drv *mdm_drv)
 	int soft_reset_direction =
 		mdm_drv->pdata->soft_reset_inverted ? 1 : 0;
 
+	mdm_peripheral_disconnect(mdm_drv);
+
 	/* Wait for the modem to complete its power down actions. */
 	for (i = 20; i > 0; i--) {
-		if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0)
+		if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0) {
+			if (mdm_debug_mask & MDM_DEBUG_MASK_SHDN_LOG)
+				pr_info("%s: mdm2ap_status went low, i = %d\n",
+					__func__, i);
 			break;
+		}
 		msleep(100);
 	}
 
@@ -130,14 +145,12 @@ static void mdm_power_down_common(struct mdm_modem_drv *mdm_drv)
 		*/
 		msleep(4000);
 	}
-	mdm_peripheral_disconnect(mdm_drv);
 }
 
 static void mdm_do_first_power_on(struct mdm_modem_drv *mdm_drv)
 {
 	int i;
 	int pblrdy;
-
 	if (power_on_count != 1) {
 		pr_err("%s: Calling fn when power_on_count != 1\n",
 			   __func__);
@@ -153,9 +166,8 @@ static void mdm_do_first_power_on(struct mdm_modem_drv *mdm_drv)
 	 * powered down.
 	 */
 	mdm_toggle_soft_reset(mdm_drv);
-
 	/* If the device has a kpd pwr gpio then toggle it. */
-	if (mdm_drv->ap2mdm_kpdpwr_n_gpio > 0) {
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_kpdpwr_n_gpio)) {
 		/* Pull AP2MDM_KPDPWR gpio high and wait for PS_HOLD to settle,
 		 * then	pull it back low.
 		 */
@@ -165,7 +177,7 @@ static void mdm_do_first_power_on(struct mdm_modem_drv *mdm_drv)
 		gpio_direction_output(mdm_drv->ap2mdm_kpdpwr_n_gpio, 0);
 	}
 
-	if (!mdm_drv->mdm2ap_pblrdy)
+	if (!GPIO_IS_VALID(mdm_drv->mdm2ap_pblrdy))
 		goto start_mdm_peripheral;
 
 	for (i = 0; i  < MDM_PBLRDY_CNT; i++) {
@@ -174,13 +186,11 @@ static void mdm_do_first_power_on(struct mdm_modem_drv *mdm_drv)
 			break;
 		usleep_range(5000, 5000);
 	}
-
 	pr_debug("%s: i:%d\n", __func__, i);
 
 start_mdm_peripheral:
 	mdm_peripheral_connect(mdm_drv);
 	msleep(200);
-    pr_info("%s--\n", __func__);
 }
 
 static void mdm_do_soft_power_on(struct mdm_modem_drv *mdm_drv)
@@ -192,7 +202,7 @@ static void mdm_do_soft_power_on(struct mdm_modem_drv *mdm_drv)
 	mdm_peripheral_disconnect(mdm_drv);
 	mdm_toggle_soft_reset(mdm_drv);
 
-	if (!mdm_drv->mdm2ap_pblrdy)
+	if (!GPIO_IS_VALID(mdm_drv->mdm2ap_pblrdy))
 		goto start_mdm_peripheral;
 
 	for (i = 0; i  < MDM_PBLRDY_CNT; i++) {
@@ -217,7 +227,7 @@ static void mdm_power_on_common(struct mdm_modem_drv *mdm_drv)
 	 * de-assert it now so that it can be asserted later.
 	 * May not be used.
 	 */
-	if (mdm_drv->ap2mdm_wakeup_gpio > 0)
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_wakeup_gpio))
 		gpio_direction_output(mdm_drv->ap2mdm_wakeup_gpio, 0);
 
 	/*
@@ -247,17 +257,46 @@ static void mdm_status_changed(struct mdm_modem_drv *mdm_drv, int value)
 	if (value) {
 		mdm_peripheral_disconnect(mdm_drv);
 		mdm_peripheral_connect(mdm_drv);
-		if (mdm_drv->ap2mdm_wakeup_gpio > 0)
+		if (GPIO_IS_VALID(mdm_drv->ap2mdm_wakeup_gpio))
 			gpio_direction_output(mdm_drv->ap2mdm_wakeup_gpio, 1);
 	}
 }
 
+static void mdm_image_upgrade(struct mdm_modem_drv *mdm_drv, int type)
+{
+	switch (type) {
+	case APQ_CONTROLLED_UPGRADE:
+		pr_debug("%s APQ controlled modem image upgrade\n", __func__);
+		mdm_drv->mdm_ready = 0;
+		mdm_toggle_soft_reset(mdm_drv);
+		break;
+	case MDM_CONTROLLED_UPGRADE:
+		pr_debug("%s MDM controlled modem image upgrade\n", __func__);
+		mdm_drv->mdm_ready = 0;
+		/*
+		 * If we have no image currently present on the modem, then we
+		 * would be in PBL, in which case the status gpio would not go
+		 * high.
+		 */
+		mdm_drv->disable_status_check = 1;
+		if (GPIO_IS_VALID(mdm_drv->usb_switch_gpio)) {
+			pr_info("%s Switching usb control to MDM\n", __func__);
+			gpio_direction_output(mdm_drv->usb_switch_gpio, 1);
+		} else
+			pr_err("%s usb switch gpio unavailable\n", __func__);
+		break;
+	default:
+		pr_err("%s invalid upgrade type\n", __func__);
+	}
+}
 static struct mdm_ops mdm_cb = {
 	.power_on_mdm_cb = mdm_power_on_common,
 	.reset_mdm_cb = mdm_power_on_common,
+	.atomic_reset_mdm_cb = mdm_atomic_soft_reset,
 	.power_down_mdm_cb = mdm_power_down_common,
 	.debug_state_changed_cb = debug_state_changed,
 	.status_cb = mdm_status_changed,
+	.image_upgrade_cb = mdm_image_upgrade,
 };
 
 static int __init mdm_modem_probe(struct platform_device *pdev)

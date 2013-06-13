@@ -603,7 +603,7 @@ static int felica_test_init(void)
   {
     FELICA_DEBUG_MSG("[FELICA_TEST] FAIL!! can not register felica_cal \n");
     return rc;
-  }  
+  }
   return 0;
 }
 

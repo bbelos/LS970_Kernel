@@ -21,6 +21,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <asm/setup.h>
 #include <mach/board_lge.h>
 
@@ -38,9 +39,11 @@
 #define PANIC_MAGIC_KEY	0x12345678
 #define CRASH_ARM9		0x87654321
 #define CRASH_REBOOT	0x618E1000
+#define CRASH_HANDLER_ENABLE 0x63680001
 
 struct crash_log_dump {
 	unsigned int magic_key;
+	unsigned int enable;
 	unsigned int size;
 	unsigned char buffer[0];
 };
@@ -48,6 +51,7 @@ struct crash_log_dump {
 static struct crash_log_dump *crash_dump_log;
 static unsigned int crash_buf_size = 0;
 static int crash_store_flag = 0;
+static int crash_handler_enable = 0;
 
 #ifdef CONFIG_CPU_CP15_MMU
 /* LGE_CHANGE 
@@ -93,7 +97,7 @@ module_param_call(gen_panic, gen_panic, param_get_bool, &dummy_arg, S_IWUSR | S_
 
 static int gen_modem_panic(const char *val, struct kernel_param *kp)
 {
-	subsystem_restart("modem");
+	subsystem_restart("external_modem");
 	return 0;
 }
 module_param_call(gen_modem_panic, gen_modem_panic, param_get_bool, &dummy_arg, S_IWUSR | S_IRUGO);
@@ -121,9 +125,40 @@ static int gen_lpass_panic(const char *val, struct kernel_param *kp)
 }
 module_param_call(gen_lpass_panic, gen_lpass_panic, param_get_bool, &dummy_arg, S_IWUSR | S_IRUGO);
 
-static int crash_handle_enable = 1;
-module_param_named(crash_handle_enable, crash_handle_enable,
-				   int, S_IRUGO | S_IWUSR | S_IWGRP);
+#define WDT0_RST        0x38
+#define WDT0_EN         0x40
+#define WDT0_BARK_TIME  0x4C
+#define WDT0_BITE_TIME  0x5C
+
+extern void __iomem *msm_timer_get_timer0_base(void);
+
+static int gen_wdt_bark(const char *val, struct kernel_param *kp)
+{
+	static void __iomem *msm_tmr0_base;
+	msm_tmr0_base = msm_timer_get_timer0_base();
+	__raw_writel(0, msm_tmr0_base + WDT0_EN);
+	__raw_writel(1, msm_tmr0_base + WDT0_RST);
+	__raw_writel(0x31F3, msm_tmr0_base + WDT0_BARK_TIME);
+	__raw_writel(5 * 0x31F3, msm_tmr0_base + WDT0_BITE_TIME);
+	__raw_writel(1, msm_tmr0_base + WDT0_EN);
+	return 0;
+}
+module_param_call(gen_wdt_bark, gen_wdt_bark, param_get_bool,
+		&dummy_arg, S_IWUSR | S_IRUGO);
+
+static int gen_hw_reset(const char *val, struct kernel_param *kp)
+{
+	static void __iomem *msm_tmr0_base;
+	msm_tmr0_base = msm_timer_get_timer0_base();
+	__raw_writel(0, msm_tmr0_base + WDT0_EN);
+	__raw_writel(1, msm_tmr0_base + WDT0_RST);
+	__raw_writel(5 * 0x31F3, msm_tmr0_base + WDT0_BARK_TIME);
+	__raw_writel(0x31F3, msm_tmr0_base + WDT0_BITE_TIME);
+	__raw_writel(1, msm_tmr0_base + WDT0_EN);
+	return 0;
+}
+module_param_call(gen_hw_reset, gen_hw_reset, param_get_bool,
+		&dummy_arg, S_IWUSR | S_IRUGO);
 
 void set_crash_store_enable(void)
 {
@@ -147,9 +182,6 @@ void store_crash_log(char *p)
 	if (crash_dump_log->size == crash_buf_size)
 		return;
 
-	if ((unsigned int)p <= 0xc0000000)
-		return;
-
 	for ( ; *p; p++) {
 		if (*p == '[') {
 			for ( ; *p != ']'; p++)
@@ -165,13 +197,35 @@ void store_crash_log(char *p)
 			p++;
 		}
 
-		crash_dump_log->buffer[crash_dump_log->size] = (unsigned char)*p;
+		crash_dump_log->buffer[crash_dump_log->size] = *p;
 		crash_dump_log->size++;
 	}
 	crash_dump_log->buffer[crash_dump_log->size] = 0;
 
 	return;
 }
+
+static int crash_handler_enable_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	ret = param_set_int(val, kp);
+	if (ret)
+		return ret;
+
+	if (crash_handler_enable) {
+		if (crash_dump_log)
+			crash_dump_log->enable = CRASH_HANDLER_ENABLE;
+		pr_info("demigod crash handler activated\n");
+	} else {
+		if (crash_dump_log)
+			crash_dump_log->enable = 0;
+		pr_info("demigod crash handler deactivated\n");
+	}
+
+	return 0;
+}
+module_param_call(crash_handler_enable, crash_handler_enable_set, param_get_int,
+		&crash_handler_enable, S_IRUGO|S_IWUSR|S_IWGRP);
 
 #ifdef CONFIG_CPU_CP15_MMU
 /* LGE_CHANGE 
@@ -260,12 +314,17 @@ static ssize_t is_hidden_show(struct device *dev, struct device_attribute *addr,
 	return sprintf(buf, "%d\n", on_hidden_reset);
 }
 static DEVICE_ATTR(is_hreset, S_IRUGO|S_IWUSR|S_IWGRP, is_hidden_show, NULL);
-
-void *lge_get_fb_copy_virt_addr(void)
-{
-	return (void *)fb_copy_virt_addr;
-}
 #endif
+
+static int __init check_crash_handler(char *reset_mode)
+{
+	if (!strncmp(reset_mode, "0x63680001", 10)) {
+		crash_handler_enable = 1;
+		printk(KERN_INFO "crash_handler_enable in user mode\n");
+	}
+	return 1;
+}
+__setup("lge.crash_enable=", check_crash_handler);
 
 static int restore_crash_log(struct notifier_block *this, unsigned long event,
 		void *ptr)
@@ -336,6 +395,13 @@ static int __init lge_panic_handler_probe(struct platform_device *pdev)
 	crash_dump_log->magic_key = 0;
 	crash_dump_log->size = 0;
 	crash_buf_size = buffer_size - offsetof(struct crash_log_dump, buffer);
+
+	if (crash_handler_enable) {
+		crash_dump_log->enable = CRASH_HANDLER_ENABLE;
+	} else {
+		crash_dump_log->enable = 0;
+	}
+
 #ifdef CONFIG_CPU_CP15_MMU
 /* LGE_CHANGE 
  * save cpu and mmu registers to support simulation when debugging
@@ -350,7 +416,7 @@ static int __init lge_panic_handler_probe(struct platform_device *pdev)
 	cpu_crash_ctx = (unsigned long *)ctx_buf;
 #endif
 #if defined(CONFIG_LGE_HIDDEN_RESET)
-	hreset_start = res-> end + 1 + 1024; /* crash buffer + ctx size */
+	hreset_start = res->end + 1 + 1024; /* crash buffer + ctx size */
 	hreset_flag_buf = ioremap(hreset_start, 1024);
 	printk(KERN_INFO "lge_hidden_reset: got buffer at %zx, size 1024\n", hreset_start);
 	if (!hreset_flag_buf) {

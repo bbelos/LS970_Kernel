@@ -153,7 +153,7 @@ enum msm_spi_state {
 
 #if defined(CONFIG_LGE_BROADCAST_TDMB) || defined(CONFIG_LGE_BROADCAST_ONESEG)
 /* Improvement SPI latency */
-#define SPI_LGE_THREAD_FEATURE
+/*#define SPI_LGE_THREAD_FEATURE*/ /* use 1seg/mmbi LGE ring buffer*/
 #endif /* CONFIG_LGE_BROADCAST */
 
 static char const * const spi_rsrcs[] = {
@@ -192,7 +192,7 @@ struct spi_dmov_cmd {
 	dma_addr_t cmd_ptr;
 };
 
-static struct pm_qos_request_list qos_req_list;
+static struct pm_qos_request qos_req_list;
 
 #ifdef CONFIG_DEBUG_FS
 /* Used to create debugfs entries */
@@ -246,22 +246,22 @@ struct msm_spi {
 	struct list_head         queue;
 	struct workqueue_struct *workqueue;
 	struct work_struct       work_data;
-
+/* LGE_BROADCAST_ONESEG { */
 #ifdef SPI_LGE_THREAD_FEATURE
 	struct task_struct       *thread;
 #endif /* SPI_LGE_THREAD_FEATURE */
-
+/* LGE_BROADCAST_ONESEG } */
 	struct spi_message      *cur_msg;
 	struct spi_transfer     *cur_transfer;
 	struct completion        transfer_complete;
 	struct clk              *clk;
 	struct clk              *pclk;
-
+/* LGE_BROADCAST_ONESEG { */
 #ifdef SPI_LGE_THREAD_FEATURE
 	wait_queue_head_t        spi_isr_wait;
 	u32                      spi_isr_sig; 
 #endif /* SPI_LGE_THREAD_FEATURE */
-
+/* LGE_BROADCAST_ONESEG } */
 	unsigned long            mem_phys_addr;
 	size_t                   mem_size;
 	int                      input_fifo_size;
@@ -338,6 +338,7 @@ struct msm_spi {
 	/* SPI CS GPIOs for each slave */
 	struct spi_cs_gpio       cs_gpios[ARRAY_SIZE(spi_cs_rsrcs)];
 	int                      qup_ver;
+	int			 max_trfr_len;
 };
 
 /* Forward declaration */

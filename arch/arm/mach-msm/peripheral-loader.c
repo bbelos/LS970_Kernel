@@ -34,6 +34,15 @@
 
 #include "peripheral-loader.h"
 
+/**
+ * proxy_timeout - Override for proxy vote timeouts
+ * -1: Use driver-specified timeout
+ *  0: Hold proxy votes until shutdown
+ * >0: Specify a custom timeout in ms
+ */
+static int proxy_timeout_ms = -1;
+module_param(proxy_timeout_ms, int, S_IRUGO | S_IWUSR);
+
 enum pil_state {
 	PIL_OFFLINE,
 	PIL_ONLINE,
@@ -114,16 +123,23 @@ static void pil_proxy_work(struct work_struct *work)
 
 static int pil_proxy_vote(struct pil_device *pil)
 {
+	int ret = 0;
+
 	if (pil->desc->ops->proxy_vote) {
 		wake_lock(&pil->wlock);
-		return pil->desc->ops->proxy_vote(pil->desc);
+		ret = pil->desc->ops->proxy_vote(pil->desc);
+		if (ret)
+			wake_unlock(&pil->wlock);
 	}
-	return 0;
+	return ret;
 }
 
 static void pil_proxy_unvote(struct pil_device *pil, unsigned long timeout)
 {
-	if (pil->desc->ops->proxy_unvote)
+	if (proxy_timeout_ms >= 0)
+		timeout = proxy_timeout_ms;
+
+	if (timeout && pil->desc->ops->proxy_unvote)
 		schedule_delayed_work(&pil->proxy, msecs_to_jiffies(timeout));
 }
 
@@ -138,8 +154,8 @@ static int load_segment(const struct elf32_phdr *phdr, unsigned num,
 	const u8 *data;
 
 	if (memblock_overlaps_memory(phdr->p_paddr, phdr->p_memsz)) {
-		dev_err(&pil->dev,
-			"kernel memory would be overwritten [%#08lx, %#08lx)\n",
+		dev_err(&pil->dev, "%s: kernel memory would be overwritten "
+			"[%#08lx, %#08lx)\n", pil->desc->name,
 			(unsigned long)phdr->p_paddr,
 			(unsigned long)(phdr->p_paddr + phdr->p_memsz));
 		return -EPERM;
@@ -150,14 +166,15 @@ static int load_segment(const struct elf32_phdr *phdr, unsigned num,
 				pil->desc->name, num);
 		ret = request_firmware(&fw, fw_name, &pil->dev);
 		if (ret) {
-			dev_err(&pil->dev, "Failed to locate blob %s\n",
-					fw_name);
+			dev_err(&pil->dev, "%s: Failed to locate blob %s\n",
+					pil->desc->name, fw_name);
 			return ret;
 		}
 
 		if (fw->size != phdr->p_filesz) {
-			dev_err(&pil->dev, "Blob size %u doesn't match %u\n",
-					fw->size, phdr->p_filesz);
+			dev_err(&pil->dev, "%s: Blob size %u doesn't match "
+					"%u\n", pil->desc->name, fw->size,
+					phdr->p_filesz);
 			ret = -EPERM;
 			goto release_fw;
 		}
@@ -174,7 +191,8 @@ static int load_segment(const struct elf32_phdr *phdr, unsigned num,
 		size = min_t(size_t, IOMAP_SIZE, count);
 		buf = ioremap(paddr, size);
 		if (!buf) {
-			dev_err(&pil->dev, "Failed to map memory\n");
+			dev_err(&pil->dev, "%s: Failed to map memory\n",
+					pil->desc->name);
 			ret = -ENOMEM;
 			goto release_fw;
 		}
@@ -195,7 +213,8 @@ static int load_segment(const struct elf32_phdr *phdr, unsigned num,
 		size = min_t(size_t, IOMAP_SIZE, count);
 		buf = ioremap(paddr, size);
 		if (!buf) {
-			dev_err(&pil->dev, "Failed to map memory\n");
+			dev_err(&pil->dev, "%s: Failed to map memory\n",
+					pil->desc->name);
 			ret = -ENOMEM;
 			goto release_fw;
 		}
@@ -210,7 +229,8 @@ static int load_segment(const struct elf32_phdr *phdr, unsigned num,
 		ret = pil->desc->ops->verify_blob(pil->desc, phdr->p_paddr,
 					  phdr->p_memsz);
 		if (ret)
-			dev_err(&pil->dev, "Blob%u failed verification\n", num);
+			dev_err(&pil->dev, "%s: Blob%u failed verification\n",
+				pil->desc->name, num);
 	}
 
 release_fw:
@@ -222,7 +242,7 @@ release_fw:
 
 static int segment_is_loadable(const struct elf32_phdr *p)
 {
-	return (p->p_type & PT_LOAD) && !segment_is_hash(p->p_flags);
+	return (p->p_type == PT_LOAD) && !segment_is_hash(p->p_flags);
 }
 
 /* Sychronize request_firmware() with suspend */
@@ -241,38 +261,43 @@ static int load_image(struct pil_device *pil)
 	snprintf(fw_name, sizeof(fw_name), "%s.mdt", pil->desc->name);
 	ret = request_firmware(&fw, fw_name, &pil->dev);
 	if (ret) {
-		dev_err(&pil->dev, "Failed to locate %s\n", fw_name);
+		dev_err(&pil->dev, "%s: Failed to locate %s\n",
+				pil->desc->name, fw_name);
 		goto out;
 	}
 
 	if (fw->size < sizeof(*ehdr)) {
-		dev_err(&pil->dev, "Not big enough to be an elf header\n");
+		dev_err(&pil->dev, "%s: Not big enough to be an elf header\n",
+				pil->desc->name);
 		ret = -EIO;
 		goto release_fw;
 	}
 
 	ehdr = (struct elf32_hdr *)fw->data;
 	if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG)) {
-		dev_err(&pil->dev, "Not an elf header\n");
+		dev_err(&pil->dev, "%s: Not an elf header\n", pil->desc->name);
 		ret = -EIO;
 		goto release_fw;
 	}
 
 	if (ehdr->e_phnum == 0) {
-		dev_err(&pil->dev, "No loadable segments\n");
+		dev_err(&pil->dev, "%s: No loadable segments\n",
+				pil->desc->name);
 		ret = -EIO;
 		goto release_fw;
 	}
 	if (sizeof(struct elf32_phdr) * ehdr->e_phnum +
 	    sizeof(struct elf32_hdr) > fw->size) {
-		dev_err(&pil->dev, "Program headers not within mdt\n");
+		dev_err(&pil->dev, "%s: Program headers not within mdt\n",
+				pil->desc->name);
 		ret = -EIO;
 		goto release_fw;
 	}
 
 	ret = pil->desc->ops->init_image(pil->desc, fw->data, fw->size);
 	if (ret) {
-		dev_err(&pil->dev, "Invalid firmware metadata\n");
+		dev_err(&pil->dev, "%s: Invalid firmware metadata\n",
+				pil->desc->name);
 		goto release_fw;
 	}
 
@@ -283,25 +308,27 @@ static int load_image(struct pil_device *pil)
 
 		ret = load_segment(phdr, i, pil);
 		if (ret) {
-			dev_err(&pil->dev, "Failed to load segment %d\n",
-					i);
+			dev_err(&pil->dev, "%s: Failed to load segment %d\n",
+					pil->desc->name, i);
 			goto release_fw;
 		}
 	}
 
 	ret = pil_proxy_vote(pil);
 	if (ret) {
-		dev_err(&pil->dev, "Failed to proxy vote\n");
+		dev_err(&pil->dev, "%s: Failed to proxy vote\n",
+					pil->desc->name);
 		goto release_fw;
 	}
 
 	ret = pil->desc->ops->auth_and_reset(pil->desc);
 	if (ret) {
-		dev_err(&pil->dev, "Failed to bring out of reset\n");
+		dev_err(&pil->dev, "%s: Failed to bring out of reset\n",
+				pil->desc->name);
 		proxy_timeout = 0; /* Remove proxy vote immediately on error */
 		goto err_boot;
 	}
-	dev_info(&pil->dev, "brought %s out of reset\n", pil->desc->name);
+	dev_info(&pil->dev, "%s: Brought out of reset\n", pil->desc->name);
 err_boot:
 	pil_proxy_unvote(pil, proxy_timeout);
 release_fw:
@@ -378,7 +405,11 @@ EXPORT_SYMBOL(pil_get);
 static void pil_shutdown(struct pil_device *pil)
 {
 	pil->desc->ops->shutdown(pil->desc);
-	flush_delayed_work(&pil->proxy);
+	if (proxy_timeout_ms == 0 && pil->desc->ops->proxy_unvote)
+		pil->desc->ops->proxy_unvote(pil->desc);
+	else
+		flush_delayed_work(&pil->proxy);
+
 	pil_set_state(pil, PIL_OFFLINE);
 }
 
@@ -397,7 +428,8 @@ void pil_put(void *peripheral_handle)
 		return;
 
 	mutex_lock(&pil->lock);
-	if (WARN(!pil->count, "%s: Reference count mismatch\n", __func__))
+	if (WARN(!pil->count, "%s: %s: Reference count mismatch\n",
+			pil->desc->name, __func__))
 		goto err_out;
 	if (!--pil->count)
 		pil_shutdown(pil);
@@ -428,7 +460,8 @@ void pil_force_shutdown(const char *name)
 	}
 
 	mutex_lock(&pil->lock);
-	if (!WARN(!pil->count, "%s: Reference count mismatch\n", __func__))
+	if (!WARN(!pil->count, "%s: %s: Reference count mismatch\n",
+			pil->desc->name, __func__))
 		pil_shutdown(pil);
 	mutex_unlock(&pil->lock);
 
@@ -448,7 +481,8 @@ int pil_force_boot(const char *name)
 	}
 
 	mutex_lock(&pil->lock);
-	if (!WARN(!pil->count, "%s: Reference count mismatch\n", __func__))
+	if (!WARN(!pil->count, "%s: %s: Reference count mismatch\n",
+			pil->desc->name, __func__))
 		ret = load_image(pil);
 	if (!ret)
 		pil_set_state(pil, PIL_ONLINE);
@@ -546,18 +580,6 @@ static void __exit msm_pil_debugfs_exit(void) { return 0; };
 static int msm_pil_debugfs_add(struct pil_device *pil) { return 0; }
 static void msm_pil_debugfs_remove(struct pil_device *pil) { }
 #endif
-
-static int __msm_pil_shutdown(struct device *dev, void *data)
-{
-	pil_shutdown(to_pil_device(dev));
-	return 0;
-}
-
-static int msm_pil_shutdown_at_boot(void)
-{
-	return bus_for_each_dev(&pil_bus_type, NULL, NULL, __msm_pil_shutdown);
-}
-late_initcall(msm_pil_shutdown_at_boot);
 
 static void pil_device_release(struct device *dev)
 {

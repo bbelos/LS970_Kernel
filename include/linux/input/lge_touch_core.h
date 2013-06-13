@@ -24,6 +24,10 @@
 #define MAX_FINGER	10
 #define MAX_BUTTON	4
 
+#ifndef CUST_G_TOUCH
+#define CUST_G_TOUCH
+#endif
+
 struct touch_device_caps
 {
 	u8		button_support;
@@ -60,11 +64,12 @@ struct touch_operation_role
 	int		accuracy_filter_enable;	// enable = 1, disable = 0
 	int		ghost_finger_solution_enable;
 	unsigned long	irqflags;
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
+#ifdef CUST_G_TOUCH
 	int		show_touches;
 	int		pointer_location;
 	int		ta_debouncing_count;
-	int 	ghost_detection_enable;
+	int		ta_debouncing_finger_num;
+	int		ghost_detection_enable;
 	int		pen_enable;
 #endif
 };
@@ -84,6 +89,7 @@ struct touch_platform_data
 	u32	int_pin;
 	u32	reset_pin;
 	char	maker[30];
+	char	fw_version[11];
 	struct touch_device_caps*		caps;
 	struct touch_operation_role*	role;
 	struct touch_power_module*		pwr;
@@ -119,27 +125,25 @@ struct touch_data
 	struct b_data	prev_button;
 };
 
-struct touch_fw_info
-{
-	u8		fw_rev;
-	u8		fw_image_rev;
-	u8		manufacturer_id;
-	u8		product_id[11];
-	u8		fw_image_product_id[11];
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
-	u8		fw_version[5];
-	u8		fw_image_version[5];
-	bool	fw_force_rework;
-#endif
-	unsigned char	*fw_start;
-	unsigned long	fw_size;
-};
-
 struct fw_upgrade_info
 {
 	char		fw_path[256];
 	u8			fw_force_upgrade;
+#ifdef CUST_G_TOUCH
+	u8			fw_force_rework;
+#endif
 	volatile u8	is_downloading;
+};
+
+struct touch_fw_info
+{
+	struct fw_upgrade_info	fw_upgrade;
+	u8		ic_fw_identifier[31];	/* String */
+	u8		ic_fw_version[11];		/* String */
+#ifdef CUST_G_TOUCH
+	u8		syna_img_fw_version[5];
+	u8		syna_img_fw_product_id[11];
+#endif
 };
 
 struct rect
@@ -165,8 +169,8 @@ struct section_info
 
 struct ghost_finger_ctrl {
 	volatile u8	 stage;
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
-	volatile u8	incoming_call;
+#ifdef CUST_G_TOUCH
+	int	incoming_call;
 #endif
 	int probe;
 	int count;
@@ -220,19 +224,19 @@ struct accuracy_filter_info {
 
 struct touch_device_driver {
 	int		(*probe)		(struct i2c_client *client);
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
+#ifdef CUST_G_TOUCH
 	int		(*resolution)	(struct i2c_client *client);
 #endif
 	void	(*remove)		(struct i2c_client *client);
 	int		(*init)			(struct i2c_client *client, struct touch_fw_info* info);
 	int		(*data)			(struct i2c_client *client, struct touch_data* data);
 	int		(*power)		(struct i2c_client *client, int power_ctrl);
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
+#ifdef CUST_G_TOUCH
 	int		(*ic_ctrl)		(struct i2c_client *client, u8 code, u32 value);
 #else
 	int		(*ic_ctrl)		(struct i2c_client *client, u8 code, u16 value);
 #endif
-	int 	(*fw_upgrade)	(struct i2c_client *client, const char* fw_path);
+	int 	(*fw_upgrade)	(struct i2c_client *client, struct touch_fw_info* info);
 };
 
 enum{
@@ -313,7 +317,7 @@ enum{
 	KEYGUARD_ENABLE,
 };
 
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
+#ifdef CUST_G_TOUCH
 enum{
 	INCOMIMG_CALL_RESERVED,
 	INCOMIMG_CALL_TOUCH,
@@ -340,6 +344,7 @@ enum{
 	IC_CTRL_READ,
 	IC_CTRL_WRITE,
 	IC_CTRL_RESET_CMD,
+	IC_CTRL_REPORT_MODE,
 };
 
 enum{
@@ -381,8 +386,22 @@ enum{
 #endif
 
 enum{
-	TIME_EX_PROBE,
-	TIME_EX_RESUME_ON,
+	WORK_POST_COMPLATE = 0,
+	WORK_POST_OUT,
+	WORK_POST_ERR_RETRY,
+	WORK_POST_ERR_CIRTICAL,
+	WORK_POST_MAX,
+};
+
+#ifdef CUST_G_TOUCH
+enum{
+	IGNORE_INTERRUPT	= 100,
+	NEED_TO_OUT,
+	NEED_TO_INIT,
+};
+
+enum{
+	TIME_EX_INIT_TIME,
 	TIME_EX_FIRST_INT_TIME,
 	TIME_EX_PREV_PRESS_TIME,
 	TIME_EX_CURR_PRESS_TIME,
@@ -390,8 +409,10 @@ enum{
 	TIME_EX_BUTTON_PRESS_END_TIME,
 	TIME_EX_FIRST_GHOST_DETECT_TIME,
 	TIME_EX_SECOND_GHOST_DETECT_TIME,
+	TIME_EX_CURR_INT_TIME,
 	TIME_EX_PROFILE_MAX
 };
+#endif
 
 #define LGE_TOUCH_NAME		"lge_touch"
 

@@ -19,10 +19,15 @@
 #include <linux/export.h>
 #include <linux/printk.h>
 #include <linux/ratelimit.h>
+#include <linux/coresight.h>
 #include <mach/scm.h>
+#include <mach/jtag.h>
 
-#include "qdss-priv.h"
 #include "cp14.h"
+
+#define BM(lsb, msb)		((BIT(msb) - BIT(lsb)) + BIT(msb))
+#define BMVAL(val, lsb, msb)	((val & BM(lsb, msb)) >> lsb)
+#define BVAL(val, n)		((val & BIT(n)) >> n)
 
 /* no of dbg regs + 1 (for storing the reg count) */
 #define MAX_DBG_REGS		(90)
@@ -1064,6 +1069,20 @@ void msm_jtag_restore_state(void)
 	int cpu;
 
 	cpu = raw_smp_processor_id();
+
+	/* Attempt restore only if save has been done. If power collapse
+	 * is disabled, hotplug off of non-boot core will result in WFI
+	 * and hence msm_jtag_save_state will not occur. Subsequently,
+	 * during hotplug on of non-boot core when msm_jtag_restore_state
+	 * is called via msm_platform_secondary_init, this check will help
+	 * bail us out without restoring.
+	 */
+	if (msm_jtag_save_cntr[cpu] == msm_jtag_restore_cntr[cpu])
+		return;
+	else if (msm_jtag_save_cntr[cpu] != msm_jtag_restore_cntr[cpu] + 1)
+		pr_err_ratelimited("jtag imbalance, save:%lu, restore:%lu\n",
+				   (unsigned long)msm_jtag_save_cntr[cpu],
+				   (unsigned long)msm_jtag_restore_cntr[cpu]);
 
 	msm_jtag_restore_cntr[cpu]++;
 	/* ensure counter is updated before moving forward */

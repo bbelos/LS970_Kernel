@@ -684,6 +684,8 @@ static int __devinit pm8xxx_ccadc_probe(struct platform_device *pdev)
 		pr_err("failed to request %d irq rc= %d\n", chip->eoc_irq, rc);
 		goto free_chip;
 	}
+
+
 	disable_irq_nosync(chip->eoc_irq);
 
 	platform_set_drvdata(pdev, chip);

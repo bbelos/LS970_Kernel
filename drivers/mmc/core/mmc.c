@@ -12,6 +12,7 @@
 
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/stat.h>
 
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
@@ -21,6 +22,10 @@
 #include "bus.h"
 #include "mmc_ops.h"
 #include "sd_ops.h"
+
+// 1: block cmd5 at eMMC suspend, 0: using cmd5 at eMMC suspend.
+// do not need cmd5 at this time.
+#define BLOCK_EMMC_CMD5_SLEEP 1
 
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
@@ -101,7 +106,7 @@ static int mmc_decode_cid(struct mmc_card *card)
 		break;
 
 	default:
-		printk(KERN_ERR "%s: card has unknown MMCA version %d\n",
+		pr_err("%s: card has unknown MMCA version %d\n",
 			mmc_hostname(card->host), card->csd.mmca_vsn);
 		return -EINVAL;
 	}
@@ -135,7 +140,7 @@ static int mmc_decode_csd(struct mmc_card *card)
 	 */
 	csd->structure = UNSTUFF_BITS(resp, 126, 2);
 	if (csd->structure == 0) {
-		printk(KERN_ERR "%s: unrecognised CSD structure version %d\n",
+		pr_err("%s: unrecognised CSD structure version %d\n",
 			mmc_hostname(card->host), csd->structure);
 		return -EINVAL;
 	}
@@ -195,7 +200,7 @@ static int mmc_get_ext_csd(struct mmc_card *card, u8 **new_ext_csd)
 	 */
 	ext_csd = kmalloc(512, GFP_KERNEL);
 	if (!ext_csd) {
-		printk(KERN_ERR "%s: could not allocate a buffer to "
+		pr_err("%s: could not allocate a buffer to "
 			"receive the ext_csd.\n", mmc_hostname(card->host));
 		return -ENOMEM;
 	}
@@ -217,12 +222,12 @@ static int mmc_get_ext_csd(struct mmc_card *card, u8 **new_ext_csd)
 		 * stored in their CSD.
 		 */
 		if (card->csd.capacity == (4096 * 512)) {
-			printk(KERN_ERR "%s: unable to read EXT_CSD "
+			pr_err("%s: unable to read EXT_CSD "
 				"on a possible high capacity card. "
 				"Card will be ignored.\n",
 				mmc_hostname(card->host));
 		} else {
-			printk(KERN_WARNING "%s: unable to read "
+			pr_warning("%s: unable to read "
 				"EXT_CSD, performance might "
 				"suffer.\n",
 				mmc_hostname(card->host));
@@ -269,7 +274,9 @@ static void mmc_select_card_type(struct mmc_card *card)
  */
 static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 {
-	int err = 0;
+	int err = 0, idx;
+	unsigned int part_size;
+	u8 hc_erase_grp_sz = 0, hc_wp_grp_sz = 0;
 
 	BUG_ON(!card);
 
@@ -280,7 +287,7 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	card->ext_csd.raw_ext_csd_structure = ext_csd[EXT_CSD_STRUCTURE];
 	if (card->csd.structure == 3) {
 		if (card->ext_csd.raw_ext_csd_structure > 2) {
-			printk(KERN_ERR "%s: unrecognised EXT_CSD structure "
+			pr_err("%s: unrecognised EXT_CSD structure "
 				"version %d\n", mmc_hostname(card->host),
 					card->ext_csd.raw_ext_csd_structure);
 			err = -EINVAL;
@@ -289,16 +296,6 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	}
 
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-
-	/* LGE CHANGED.. to determine 24nm eMMC or 19nm eMMC */
-	if(card->ext_csd.rev == 5)
-			printk("LGE eMMC is : %s\n", "24nm");
-	else if(card->ext_csd.rev == 6)
-			printk("LGE eMMC is : %s\n", "19nm");
-	else
-			printk("LGE does not use : %d",card->ext_csd.rev);
-	/*end LGE CHANGED  */
-
 	if (card->ext_csd.rev > 6) {
 		printk(KERN_ERR "%s: unrecognised EXT_CSD revision %d\n",
 			mmc_hostname(card->host), card->ext_csd.rev);
@@ -354,11 +351,19 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		 * There are two boot regions of equal size, defined in
 		 * multiples of 128K.
 		 */
-		card->ext_csd.boot_size = ext_csd[EXT_CSD_BOOT_MULT] << 17;
+		if (ext_csd[EXT_CSD_BOOT_MULT] && mmc_boot_partition_access(card->host)) {
+			for (idx = 0; idx < MMC_NUM_BOOT_PARTITION; idx++) {
+				part_size = ext_csd[EXT_CSD_BOOT_MULT] << 17;
+				mmc_part_add(card, part_size,
+					EXT_CSD_PART_CONFIG_ACC_BOOT0 + idx,
+					"boot%d", idx, true,
+					MMC_BLK_DATA_AREA_BOOT);
+			}
+		}
 	}
 
 	card->ext_csd.raw_hc_erase_gap_size =
-		ext_csd[EXT_CSD_PARTITION_ATTRIBUTE];
+		ext_csd[EXT_CSD_HC_WP_GRP_SIZE];
 	card->ext_csd.raw_sec_trim_mult =
 		ext_csd[EXT_CSD_SEC_TRIM_MULT];
 	card->ext_csd.raw_sec_erase_mult =
@@ -376,9 +381,9 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		card->ext_csd.raw_partition_support = ext_csd[EXT_CSD_PARTITION_SUPPORT];
 		if ((ext_csd[EXT_CSD_PARTITION_SUPPORT] & 0x2) &&
 		    (ext_csd[EXT_CSD_PARTITION_ATTRIBUTE] & 0x1)) {
-			u8 hc_erase_grp_sz =
+			hc_erase_grp_sz =
 				ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE];
-			u8 hc_wp_grp_sz =
+			hc_wp_grp_sz =
 				ext_csd[EXT_CSD_HC_WP_GRP_SIZE];
 
 			card->ext_csd.enhanced_area_en = 1;
@@ -407,6 +412,42 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			card->ext_csd.enhanced_area_offset = -EINVAL;
 			card->ext_csd.enhanced_area_size = -EINVAL;
 		}
+
+		/*
+		 * General purpose partition feature support --
+		 * If ext_csd has the size of general purpose partitions,
+		 * set size, part_cfg, partition name in mmc_part.
+		 */
+		if (ext_csd[EXT_CSD_PARTITION_SUPPORT] &
+			EXT_CSD_PART_SUPPORT_PART_EN) {
+			if (card->ext_csd.enhanced_area_en != 1) {
+				hc_erase_grp_sz =
+					ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE];
+				hc_wp_grp_sz =
+					ext_csd[EXT_CSD_HC_WP_GRP_SIZE];
+
+				card->ext_csd.enhanced_area_en = 1;
+			}
+
+			for (idx = 0; idx < MMC_NUM_GP_PARTITION; idx++) {
+				if (!ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3] &&
+				!ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3 + 1] &&
+				!ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3 + 2])
+					continue;
+				part_size =
+				(ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3 + 2]
+					<< 16) +
+				(ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3 + 1]
+					<< 8) +
+				ext_csd[EXT_CSD_GP_SIZE_MULT + idx * 3];
+				part_size *= (size_t)(hc_erase_grp_sz *
+					hc_wp_grp_sz);
+				mmc_part_add(card, part_size << 19,
+					EXT_CSD_PART_CONFIG_ACC_GP0 + idx,
+					"gp%d", idx, false,
+					MMC_BLK_DATA_AREA_GP);
+			}
+		}
 		card->ext_csd.sec_trim_mult =
 			ext_csd[EXT_CSD_SEC_TRIM_MULT];
 		card->ext_csd.sec_erase_mult =
@@ -415,10 +456,18 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			ext_csd[EXT_CSD_SEC_FEATURE_SUPPORT];
 		card->ext_csd.trim_timeout = 300 *
 			ext_csd[EXT_CSD_TRIM_MULT];
+
+		/*
+		 * Note that the call to mmc_part_add above defaults to read
+		 * only. If this default assumption is changed, the call must
+		 * take into account the value of boot_locked below.
+		 */
+		card->ext_csd.boot_ro_lock = ext_csd[EXT_CSD_BOOT_WP];
+		card->ext_csd.boot_ro_lockable = true;
 	}
 
 	if (card->ext_csd.rev >= 5) {
-		/* check whether the eMMC card support BKOPS */
+		/* check whether the eMMC card supports BKOPS */
 		if (ext_csd[EXT_CSD_BKOPS_SUPPORT] & 0x1) {
 			card->ext_csd.bkops = 1;
 			card->ext_csd.bkops_en = ext_csd[EXT_CSD_BKOPS_EN];
@@ -429,11 +478,14 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 				err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 					EXT_CSD_BKOPS_EN, 1, 0);
 				if (err)
-					pr_warning("%s: Enabling BKOPS failed\n",
+					pr_warn("%s: Enabling BKOPS failed\n",
 						mmc_hostname(card->host));
 				else
 					card->ext_csd.bkops_en = 1;
 			}
+			if (!card->ext_csd.bkops_en)
+				pr_info("%s: BKOPS_EN bit is not set\n",
+					mmc_hostname(card->host));
 		}
 
 		/* check whether the eMMC card supports HPI */
@@ -476,6 +528,20 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			ext_csd[EXT_CSD_CACHE_SIZE + 2] << 16 |
 			ext_csd[EXT_CSD_CACHE_SIZE + 3] << 24;
 
+		if (ext_csd[EXT_CSD_DATA_SECTOR_SIZE] == 1)
+			card->ext_csd.data_sector_size = 4096;
+		else
+			card->ext_csd.data_sector_size = 512;
+
+		if ((ext_csd[EXT_CSD_DATA_TAG_SUPPORT] & 1) &&
+		    (ext_csd[EXT_CSD_TAG_UNIT_SIZE] <= 8)) {
+			card->ext_csd.data_tag_unit_size =
+			((unsigned int) 1 << ext_csd[EXT_CSD_TAG_UNIT_SIZE]) *
+			(card->ext_csd.data_sector_size);
+		} else {
+			card->ext_csd.data_tag_unit_size = 0;
+		}
+
 		card->ext_csd.max_packed_writes =
 			ext_csd[EXT_CSD_MAX_PACKED_WRITES];
 		card->ext_csd.max_packed_reads =
@@ -512,7 +578,7 @@ static int mmc_compare_ext_csds(struct mmc_card *card, unsigned bus_width)
 		goto out;
 
 	/* only compare read only fields */
-	err = (!(card->ext_csd.raw_partition_support ==
+	err = !((card->ext_csd.raw_partition_support ==
 			bw_ext_csd[EXT_CSD_PARTITION_SUPPORT]) &&
 		(card->ext_csd.raw_erased_mem_count ==
 			bw_ext_csd[EXT_CSD_ERASED_MEM_CONT]) &&
@@ -778,11 +844,19 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
 
+	/* Set correct bus mode for MMC before attempting init */
+	if (!mmc_host_is_spi(host))
+		mmc_set_bus_mode(host, MMC_BUSMODE_OPENDRAIN);
+
+	/* Initialization should be done at 3.3 V I/O voltage. */
+	mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330, 0);
+
 	/*
 	 * Since we're changing the OCR value, we seem to
 	 * need to tell some cards to go back to the idle
 	 * state.  We wait 1ms to give cards time to
 	 * respond.
+	 * mmc_go_idle is needed for eMMC that are asleep
 	 */
 	mmc_go_idle(host);
 
@@ -899,7 +973,8 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	 * If enhanced_area_en is TRUE, host needs to enable ERASE_GRP_DEF
 	 * bit.  This bit will be lost every time after a reset or power off.
 	 */
-	if (card->ext_csd.enhanced_area_en) {
+	if (card->ext_csd.enhanced_area_en ||
+	    (card->ext_csd.rev >= 3 && (host->caps2 & MMC_CAP2_HC_ERASE_SZ))) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				 EXT_CSD_ERASE_GROUP_DEF, 1,
 				 card->ext_csd.generic_cmd6_time);
@@ -957,7 +1032,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		 * so check for success and update the flag
 		 */
 		if (!err)
-			card->poweroff_notify_state = MMC_POWERED_ON;
+			card->ext_csd.power_off_notification = EXT_CSD_POWER_ON;
 	}
 
 	/*
@@ -977,7 +1052,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			goto free_card;
 
 		if (err) {
-			printk(KERN_WARNING "%s: switch to highspeed failed\n",
+			pr_warning("%s: switch to highspeed failed\n",
 			       mmc_hostname(card->host));
 			err = 0;
 		} else {
@@ -1134,7 +1209,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 					 card->ext_csd.generic_cmd6_time);
 		}
 		if (err) {
-			printk(KERN_WARNING "%s: switch to bus width %d ddr %d "
+			pr_warning("%s: switch to bus width %d ddr %d "
 				"failed\n", mmc_hostname(card->host),
 				1 << bus_width, ddr);
 			goto free_card;
@@ -1189,19 +1264,29 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	if ((host->caps2 & MMC_CAP2_CACHE_CTRL) &&
 			card->ext_csd.cache_size > 0) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
-				EXT_CSD_CACHE_CTRL, 1, 0);
+				EXT_CSD_CACHE_CTRL, 1,
+				card->ext_csd.generic_cmd6_time);
 		if (err && err != -EBADMSG)
 			goto free_card;
 
 		/*
 		 * Only if no error, cache is turned on successfully.
 		 */
-		card->ext_csd.cache_ctrl = err ? 0 : 1;
+		if (err) {
+			pr_warning("%s: Cache is supported, "
+					"but failed to turn on (%d)\n",
+					mmc_hostname(card->host), err);
+			card->ext_csd.cache_ctrl = 0;
+			err = 0;
+		} else {
+			card->ext_csd.cache_ctrl = 1;
+		}
 	}
 
-	if ((host->caps2 & MMC_CAP2_PACKED_CMD) &&
-			(card->ext_csd.max_packed_writes > 0) &&
-			(card->ext_csd.max_packed_reads > 0)) {
+	if ((host->caps2 & MMC_CAP2_PACKED_WR &&
+			card->ext_csd.max_packed_writes > 0) ||
+	    (host->caps2 & MMC_CAP2_PACKED_RD &&
+			card->ext_csd.max_packed_reads > 0)) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				EXT_CSD_EXP_EVENTS_CTRL,
 				EXT_CSD_PACKED_EVENT_EN,
@@ -1234,6 +1319,30 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			if (!card->wr_pack_stats.packing_events)
 				goto free_card;
 		}
+
+		if (card->ext_csd.bkops_en) {
+			INIT_DELAYED_WORK(&card->bkops_info.dw,
+					  mmc_start_idle_time_bkops);
+			INIT_WORK(&card->bkops_info.poll_for_completion,
+				  mmc_bkops_completion_polling);
+
+			/*
+			 * Calculate the time to start the BKOPs checking.
+			 * The idle time of the host controller should be taken
+			 * into account in order to prevent a race condition
+			 * before starting BKOPs and going into suspend.
+			 * If the host controller didn't set its idle time,
+			 * a default value is used.
+			 */
+			card->bkops_info.delay_ms = MMC_IDLE_BKOPS_TIME_MS;
+			if (card->bkops_info.host_suspend_tout_ms)
+				card->bkops_info.delay_ms = min(
+					card->bkops_info.delay_ms,
+				      card->bkops_info.host_suspend_tout_ms/2);
+
+			card->bkops_info.min_sectors_to_queue_delayed_work =
+				BKOPS_MIN_SECTORS_TO_QUEUE_DELAYED_WORK;
+		}
 	}
 
 	if (!oldcard)
@@ -1247,6 +1356,35 @@ free_card:
 		mmc_remove_card(card);
 err:
 	mmc_free_ext_csd(ext_csd);
+
+	return err;
+}
+
+static int mmc_can_poweroff_notify(const struct mmc_card *card)
+{
+	return card &&
+		mmc_card_mmc(card) &&
+		(card->ext_csd.power_off_notification == EXT_CSD_POWER_ON);
+}
+
+static int mmc_poweroff_notify(struct mmc_card *card, unsigned int notify_type)
+{
+	unsigned int timeout = card->ext_csd.generic_cmd6_time;
+	int err;
+
+	/* Use EXT_CSD_POWER_OFF_SHORT as default notification type. */
+	if (notify_type == EXT_CSD_POWER_OFF_LONG)
+		timeout = card->ext_csd.power_off_longtime;
+
+	err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+			 EXT_CSD_POWER_OFF_NOTIFICATION,
+			 notify_type, timeout);
+	if (err)
+		pr_err("%s: Power Off Notification timed out, %u\n",
+		       mmc_hostname(card->host), timeout);
+
+	/* Disable the power off notification after the switch operation. */
+	card->ext_csd.power_off_notification = EXT_CSD_NO_POWER_NOTIFICATION;
 
 	return err;
 }
@@ -1308,16 +1446,27 @@ static void mmc_detect(struct mmc_host *host)
  */
 static int mmc_suspend(struct mmc_host *host)
 {
+	int err = 0;
+
 	BUG_ON(!host);
 	BUG_ON(!host->card);
 
 	mmc_claim_host(host);
-	if (!mmc_host_is_spi(host))
+	if (mmc_can_poweroff_notify(host->card))
+		err = mmc_poweroff_notify(host->card, EXT_CSD_POWER_OFF_SHORT);
+#if BLOCK_EMMC_CMD5_SLEEP
+        else if (!mmc_host_is_spi(host))
+                mmc_deselect_cards(host);
+#else
+	else if (mmc_card_can_sleep(host))
+		err = mmc_card_sleep(host);
+	else if (!mmc_host_is_spi(host))
 		mmc_deselect_cards(host);
-	host->card->state &= ~MMC_STATE_HIGHSPEED;
+#endif
+	host->card->state &= ~(MMC_STATE_HIGHSPEED | MMC_STATE_HIGHSPEED_200);
 	mmc_release_host(host);
 
-	return 0;
+	return err;
 }
 
 /*
@@ -1344,7 +1493,7 @@ static int mmc_power_restore(struct mmc_host *host)
 {
 	int ret;
 
-	host->card->state &= ~MMC_STATE_HIGHSPEED;
+	host->card->state &= ~(MMC_STATE_HIGHSPEED | MMC_STATE_HIGHSPEED_200);
 	mmc_claim_host(host);
 	ret = mmc_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
@@ -1426,6 +1575,10 @@ int mmc_attach_mmc(struct mmc_host *host)
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
 
+	/* Set correct bus mode for MMC before attempting attach */
+	if (!mmc_host_is_spi(host))
+		mmc_set_bus_mode(host, MMC_BUSMODE_OPENDRAIN);
+
 	err = mmc_send_op_cond(host, 0, &ocr);
 	if (err)
 		return err;
@@ -1448,7 +1601,7 @@ int mmc_attach_mmc(struct mmc_host *host)
 	 * support.
 	 */
 	if (ocr & 0x7F) {
-		printk(KERN_WARNING "%s: card claims to support voltages "
+		pr_warning("%s: card claims to support voltages "
 		       "below the defined range. These will be ignored.\n",
 		       mmc_hostname(host));
 		ocr &= ~0x7F;
@@ -1487,7 +1640,7 @@ remove_card:
 err:
 	mmc_detach_bus(host);
 
-	printk(KERN_ERR "%s: error %d whilst initialising MMC card\n",
+	pr_err("%s: error %d whilst initialising MMC card\n",
 		mmc_hostname(host), err);
 
 	return err;

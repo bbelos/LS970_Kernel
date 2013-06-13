@@ -22,11 +22,15 @@
 #ifdef CONFIG_WAKELOCK_STAT
 #include <linux/proc_fs.h>
 #endif
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 #include "power.h"
+
+#ifdef CONFIG_MACH_LGE
+#include <mach/lge/lge_blocking_monitor.h>
+#endif
 
 enum {
 	DEBUG_EXIT_SUSPEND = 1U << 0,
@@ -35,7 +39,11 @@ enum {
 	DEBUG_EXPIRE = 1U << 3,
 	DEBUG_WAKE_LOCK = 1U << 4,
 };
+#ifdef CONFIG_LGE_PM
+static int debug_mask = DEBUG_EXIT_SUSPEND | DEBUG_WAKEUP | DEBUG_SUSPEND;
+#else
 static int debug_mask = DEBUG_EXIT_SUSPEND | DEBUG_WAKEUP;
+#endif
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
 #define WAKE_LOCK_TYPE_MASK              (0x0f)
@@ -57,19 +65,22 @@ struct wake_lock main_wake_lock;
 suspend_state_t requested_suspend_state = PM_SUSPEND_MEM;
 static struct wake_lock unknown_wakeup;
 static struct wake_lock suspend_backoff_lock;
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 #ifdef CONFIG_LGE_SUSPEND_TIME
 static struct timespec suspend_time_before;
 static unsigned int time_in_suspend_bins[32];
 static void suspend_time_suspend(void);
 static void suspend_time_resume(void);
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 
 #define SUSPEND_BACKOFF_THRESHOLD	10
 #define SUSPEND_BACKOFF_INTERVAL	10000
 
 static unsigned suspend_short_count;
+
+#ifdef CONFIG_MACH_LGE
+static int wakelock_monitor_id;
+#endif
 
 #ifdef CONFIG_WAKELOCK_STAT
 static struct wake_lock deleted_wake_locks;
@@ -354,13 +365,20 @@ static void suspend(struct work_struct *work)
 	int entry_event_num;
 	struct timespec ts_entry, ts_exit;
 
+#ifdef CONFIG_MACH_LGE
+	start_monitor_blocking(wakelock_monitor_id,
+		jiffies + usecs_to_jiffies(5000000));
+#endif
+
 	if (has_wake_lock(WAKE_LOCK_SUSPEND)) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("suspend: abort suspend\n");
+#ifdef CONFIG_MACH_LGE
+		end_monitor_blocking(wakelock_monitor_id);
+#endif
 		return;
 	}
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 	save_suspend_step(SUSPEND_START);
 	entry_event_num = current_event_num;
 	suspend_sys_sync_queue();
@@ -377,7 +395,6 @@ static void suspend(struct work_struct *work)
 #ifdef CONFIG_LGE_SUSPEND_TIME
 	suspend_time_resume();
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 
 	if (debug_mask & DEBUG_EXIT_SUSPEND) {
 		struct rtc_time tm;
@@ -404,7 +421,10 @@ static void suspend(struct work_struct *work)
 			pr_info("suspend: pm_suspend returned with no event\n");
 		wake_lock_timeout(&unknown_wakeup, HZ / 2);
 	}
-	save_suspend_step(SUSPEND_EXITDONE);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_suspend_step(SUSPEND_EXITDONE);  // LGE_UPDATE
+#ifdef CONFIG_MACH_LGE
+	end_monitor_blocking(wakelock_monitor_id);
+#endif
 }
 static DECLARE_WORK(suspend_work, suspend);
 
@@ -638,7 +658,6 @@ int wake_lock_active(struct wake_lock *lock)
 }
 EXPORT_SYMBOL(wake_lock_active);
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_LGE_SUSPEND_AUTOTEST
 int wake_lock_active_name(char *name)
 {
@@ -658,7 +677,7 @@ int wake_lock_active_name(char *name)
 }
 EXPORT_SYMBOL(wake_lock_active_name);
 #endif
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 static int wakelock_stats_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, wakelock_stats_show, NULL);
@@ -719,6 +738,13 @@ static int __init wakelocks_init(void)
 	proc_create("wakelocks", S_IRUGO, NULL, &wakelock_stats_fops);
 #endif
 
+#ifdef CONFIG_MACH_LGE
+	wakelock_monitor_id = create_blocking_monitor("wakelocks");
+
+	if (wakelock_monitor_id < 0)
+		return wakelock_monitor_id;
+#endif
+
 	return 0;
 
 err_suspend_work_queue:
@@ -753,7 +779,6 @@ static void  __exit wakelocks_exit(void)
 #endif
 }
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_DEBUG_FS
 #ifdef CONFIG_LGE_SUSPEND_TIME
 static void suspend_time_suspend(void)
@@ -771,7 +796,10 @@ static void suspend_time_resume(void)
 
 	after = timespec_sub(after, suspend_time_before);
 
-	time_in_suspend_bins[fls(after.tv_sec)]++;
+	if( fls(after.tv_sec) >= ARRAY_SIZE(time_in_suspend_bins) )
+		pr_err("Suspend interval is too large\n");
+	else
+		time_in_suspend_bins[fls(after.tv_sec)]++;
 
 	pr_info("Suspended for %lu.%03lu seconds\n", after.tv_sec,
 			after.tv_nsec / NSEC_PER_MSEC);
@@ -939,6 +967,6 @@ late_initcall(earlysuspend_debugfs_init);
 #endif
 
 struct suspend_wq_stats suspend_wq_stats;
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 core_initcall(wakelocks_init);
 module_exit(wakelocks_exit);

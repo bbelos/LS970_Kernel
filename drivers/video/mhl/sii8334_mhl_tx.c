@@ -17,8 +17,25 @@
 
 #include "sii8334_mhl_tx.h"
 
+/* LGE_CHANGE
+ * do device driver initialization
+ * using multithread during booting,
+ * in order to reduce booting time.
+ *
+ * ported from G1-project
+ * 2012-11-30, chaeuk.lee@lge.com
+ */
+#define LGE_MULTICORE_FASTBOOT
+#if defined(CONFIG_MACH_LGE) && defined(LGE_MULTICORE_FASTBOOT)
+#include <linux/kthread.h>
+#endif
+
+#ifdef CONFIG_LGE_MHL_REMOCON_TEST
+#include <linux/proc_fs.h>
+#endif
+
 #ifdef CONFIG_MACH_LGE
-#define LGE_ADOPTER_ID 612  
+#define LGE_ADOPTER_ID 612
 #endif
 
 #define SILICON_IMAGE_ADOPTER_ID 322
@@ -57,7 +74,7 @@ static	bool		mscCmdInProgress;	// false when it is okay to send a new command
 //
 static	uint8_t	dsHpdStatus = 0;
 
-#ifndef CONFIG_MACH_LGE
+#ifdef CONFIG_MACH_LGE
 static	bool		sii8334_mhl_suspended = false;
 #endif
 
@@ -69,23 +86,35 @@ static uint8_t MHLSleepStatus = 0;
 void SiiRegWrite(uint16_t virtualAddr, uint8_t value)
 {
 	struct i2c_client* client;
+	uint16_t client_number;
 
 	/*remove qup error*/
 	if(MHLSleepStatus) return;
 
-	client = sii8334_mhl_i2c_client[(virtualAddr >> 8)];
+	client_number = (virtualAddr >> 8);
+
+	if(client_number > SII8334_I2C_DEVICE_NUMBER)
+    return;
+
+	client = sii8334_mhl_i2c_client[client_number];
 	i2c_smbus_write_byte_data(client, (virtualAddr & 0xff), value);
 }
 
 uint8_t SiiRegRead(uint16_t virtualAddr)
 {
 	int value;
+	uint16_t client_number;
 	struct i2c_client* client;
 
 	/*remove qup error*/
 	if(MHLSleepStatus) return 0xFF;
 
-	client = sii8334_mhl_i2c_client[(virtualAddr >> 8)];
+	client_number = (virtualAddr >> 8);
+
+	if(client_number > SII8334_I2C_DEVICE_NUMBER)
+		return 0xFF;
+
+	client = sii8334_mhl_i2c_client[client_number];
 
 	value = i2c_smbus_read_byte_data(client, (virtualAddr & 0xff));
 
@@ -217,8 +246,8 @@ uint8_t g_chipRevId;
 
 struct mhl_common_type
 {
-    void  (*send_uevent)(char *buf);	
-    void (*hdmi_hpd_on)(int on);	
+    void  (*send_uevent)(char *buf);
+    void (*hdmi_hpd_on)(int on);
 };
 
 struct mhl_common_type  *mhl_common_state;
@@ -286,7 +315,7 @@ static void Int1Isr(void)
 {
 	uint8_t regIntr1;
     regIntr1 = SiiRegRead(REG_INTR1);
-	
+
     if (regIntr1)
     {
         // Clear all interrupts coming from this register.
@@ -696,7 +725,7 @@ static void InitCBusRegs (void)
 	uint8_t		regval;
 
 	SiiRegWrite(TX_PAGE_CBUS | 0x0007, 0xF2); 			// Increase DDC translation layer timer
-	SiiRegWrite(TX_PAGE_CBUS | 0x0036, 0x03); 			// Drive High Time. -- changed from 0x0C on 2011-10-03 - 17:00
+	SiiRegWrite(TX_PAGE_CBUS | 0x0036, 0x0B); 			// Drive High Time(changed from 0x0C to 0x03), it changed again from 0x03 to 0x0B for CBUS test of MHL certification
 	SiiRegWrite(REG_CBUS_LINK_CONTROL_8, 0x30); 		// Use programmed timing.
 	SiiRegWrite(TX_PAGE_CBUS | 0x0040, 0x03); 			// CBUS Drive Strength
 
@@ -838,6 +867,7 @@ void SwitchToD0 (void)
 ////////////////////////////////////////////////////////////////////
 void SwitchToD3 (void)
 {
+
 	if(POWER_STATE_D3 != fwPowerState)
 	{
 #ifndef	__KERNEL__ //(
@@ -886,7 +916,6 @@ void SwitchToD3 (void)
 		}
 */
 	}
-
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -908,7 +937,7 @@ static int Int4Isr (void)
 	uint8_t int4Status;
 
 	int4Status = SiiRegRead(REG_INTR4);	// read status
-	
+
 	// When I2C is inoperational (D3) and a previous interrupt brought us here, do nothing.
 	if(0xFF != int4Status)
 	{
@@ -1807,6 +1836,9 @@ static void MhlTxDriveStates( void )
         int reQueueRequest = 0;
         cbus_req_t *pReq = GetNextCBusTransaction(MhlTxDriveStates);
             // coordinate write burst requests and grants.
+            if (pReq == NULL)
+				return;
+
             if (MHL_SET_INT == pReq->command)
             {
                 if (MHL_RCHANGE_INT == pReq->offsetData)
@@ -2973,7 +3005,7 @@ MhlTxNotifyEventsStatus_e  AppNotifyMhlEvent(uint8_t eventCode, uint8_t eventPar
 			strncpy(event_string, "MHLEVENT=connected", MAX_EVENT_STRING_LEN);
 			kobject_uevent_env(&gDriverContext.pDevice->kobj,
 								KOBJ_CHANGE, envp);
-#ifdef CONFIG_MACH_LGE  
+#ifdef CONFIG_MACH_LGE
                     /* HDMI HPD on when MHL is connected*/
                     pr_info("%s : HDMI HPD on when MHL is connected \n",__func__);
 			if(mhl_common_state->hdmi_hpd_on)
@@ -2996,7 +3028,7 @@ MhlTxNotifyEventsStatus_e  AppNotifyMhlEvent(uint8_t eventCode, uint8_t eventPar
 			kobject_uevent_env(&gDriverContext.pDevice->kobj,
 								KOBJ_CHANGE, envp);
 
-#ifdef CONFIG_MACH_LGE  
+#ifdef CONFIG_MACH_LGE
                     /* HDMI HPD off when MHL is disconnected */
                     pr_info("%s : HDMI HPD off when MHL is disconnected \n",__func__);
 			if(mhl_common_state->hdmi_hpd_on)
@@ -3356,7 +3388,7 @@ void SiiMhlTxReadScratchpad(void)
 		mhlTxConfig.mscScratchpadData[m_idx] = SiiRegRead( TX_PAGE_CBUS |( 0xC0+m_idx));
 		//pr_info("[MAGIC] SiiMhlTxReadScratchpad, [%d] %x\n", m_idx, mhlTxConfig.mscScratchpadData[m_idx]);
 	}
-	
+
 	MhlControl();
 }
 
@@ -3366,7 +3398,7 @@ void SiiMhlTxWriteScratchpad(uint8_t *wdata)
 
 	SiiRegWrite(REG_CBUS_PRI_START,0xff);
 	SiiRegWrite(REG_CBUS_PRI_ADDR_CMD, 0x40);
-	
+
 	SiiRegWrite(REG_MSC_WRITE_BURST_LEN, MHD_MAX_BUFFER_SIZE -1 );
 
 	for ( i = 0; i < MHD_MAX_BUFFER_SIZE; i++ )
@@ -3397,7 +3429,7 @@ int mhl_kbd_key(unsigned int tKeyCode, int value)	// keyboard key input, here be
 
 	 if(mhl_common_state->send_uevent)
 		mhl_common_state->send_uevent(mbuf);
-	 
+
 	return 0;
 }
 void mhl_writeburst_uevent(unsigned short mev)
@@ -3423,7 +3455,7 @@ void mhl_writeburst_uevent(unsigned short mev)
 
 	if(mhl_common_state->send_uevent)
 	      mhl_common_state->send_uevent(env_buf);
-	   
+
 	pr_info("[MAGIC] mhl_writeburst_uevent %s\n",env_buf);
 	return;
 }
@@ -3444,6 +3476,7 @@ void MhlControl(void)
 	int fdr = 3;
 	int tmp_x = 0;
 	int tmp_y = 0;
+	char mbuf[120];
 
 	static uint8_t pre_r_action = 0;
 	static int pre_x_position = 0;
@@ -3483,19 +3516,11 @@ void MhlControl(void)
 				pre_y_position = y_position;
 			}
 
-			#if 0
-			mhl_ts_input(x_position, y_position, r_action);
-			#else
-			{
-				char mbuf[120];
-
-				memset(mbuf, 0, sizeof(mbuf));
-				pr_info("%s ->magic RC, action:%d, (%d,%d) ",__func__,r_action,x_position,y_position);
-				sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", r_action,x_position,y_position);
-				if(mhl_common_state->send_uevent)
-	      				mhl_common_state->send_uevent(mbuf);  
-			}
-			#endif
+			memset(mbuf, 0, sizeof(mbuf));
+			pr_info("%s ->magic RC, action:%d, (%d,%d)\n",__func__,r_action,x_position,y_position);
+			sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", r_action,x_position,y_position);
+			if(mhl_common_state->send_uevent)
+				mhl_common_state->send_uevent(mbuf);
 		}
 		else if(command == 0x02)		// mouse -> relative position + mouse button
 		{
@@ -3560,9 +3585,9 @@ void MhlControl(void)
 					memset(mbuf, 0, sizeof(mbuf));
 					pr_info("%s ->magic RC, action:%d, (%d,%d) \n",__func__,r_action,x_position,y_position);
 					sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", r_action,x_position,y_position);
-					
+
 				       if(mhl_common_state->send_uevent)
-	      					mhl_common_state->send_uevent(mbuf);     
+	      					mhl_common_state->send_uevent(mbuf);
 				}
 				return;
 			}
@@ -3762,6 +3787,16 @@ int mhl_get_i2c_index(int addr)
     return 0;
 }
 
+#if defined(CONFIG_MACH_LGE) && defined(LGE_MULTICORE_FASTBOOT)
+static int sii8334_mhl_tx_probe_thread(void *arg)
+{
+    /* force power on - never power down */
+	mhl_pdata[0]->power(1, 0);
+
+	return StartMhlTxDevice();
+}
+#endif
+
 static int32_t sii8334_mhl_tx_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
@@ -3775,7 +3810,7 @@ static int32_t sii8334_mhl_tx_probe(struct i2c_client *client,
 
 	++sii8334_i2c_dev_index;
 	if (sii8334_i2c_dev_index < SII8334_I2C_DEVICE_NUMBER)
-		return ret;
+		goto error;
 
 	/* If a major device number has already been selected use it,
 	 * otherwise dynamically allocate one.
@@ -3793,7 +3828,7 @@ static int32_t sii8334_mhl_tx_probe(struct i2c_client *client,
     if (ret) {
 		printk(KERN_ERR "register_chrdev %d, %s failed, error code: %d\n",
 			devMajor, MHL_DRIVER_NAME, ret);
-		return ret;
+		goto error;
 	}
 
 	cdev_init(&siiMhlCdev, &siiMhlFops);
@@ -3821,18 +3856,18 @@ static int32_t sii8334_mhl_tx_probe(struct i2c_client *client,
 		goto free_class;
 	}
 
-#ifdef CONFIG_MACH_LGE  
+#ifdef CONFIG_MACH_LGE
 	mhl_common_state =  (struct mhl_common_type *)kmalloc(sizeof(
 		                              struct mhl_common_type), GFP_KERNEL);
 	if(!mhl_common_state){
 		pr_err("%s: memory allocation fail\n",__func__);
 		ret = -ENOMEM;
-		goto error;
+		goto free_dev;
 	}
-	
+
 	mhl_common_state->hdmi_hpd_on = hdmi_common_set_hpd_on;
-       mhl_common_state->send_uevent = hdmi_common_send_uevent;
-	   
+	mhl_common_state->send_uevent = hdmi_common_send_uevent;
+
 #endif	/* CONFIG_MACH_LGE */
 
 	sema_init(&sii8334_irq_sem, 1);
@@ -3841,15 +3876,32 @@ static int32_t sii8334_mhl_tx_probe(struct i2c_client *client,
 		sii8334_mhl_tx_irq, IRQF_TRIGGER_LOW | IRQF_ONESHOT, MHL_PART_NAME,
 		NULL);
 
+#if defined(CONFIG_MACH_LGE) && defined(LGE_MULTICORE_FASTBOOT)
+	{
+		struct task_struct *th;
+		th = kthread_create(sii8334_mhl_tx_probe_thread, NULL, "sii8334_mhl_tx_probe");
+		if (IS_ERR(th)) {
+			ret = PTR_ERR(th);
+			goto free_dev;
+		}
+		wake_up_process(th);
+		return 0;
+	}
+#else
     /* force power on - never power down */
 	mhl_pdata[0]->power(1, 0);
 
 	ret = StartMhlTxDevice();
-	if(ret == 0)
-		return 0;
-	else
-		device_destroy(siiMhlClass, MKDEV(devMajor, 0));
-	
+	if(ret) {
+		pr_err("%s: StartMhlTxDevice fail\n", __func__);
+		goto free_dev;
+	}
+
+	return 0;
+#endif /* CONFIG_MACH_LGE && LGE_MULTICORE_FASTBOOT */
+
+free_dev:
+	device_destroy(siiMhlClass, MKDEV(devMajor, 0));
 
 free_class:
 	class_destroy(siiMhlClass);
@@ -3859,7 +3911,8 @@ free_cdev:
 
 free_chrdev:
 	unregister_chrdev_region(MKDEV(devMajor, 0), MHL_DRIVER_MINOR_MAX);
-error:	
+
+error:
 	return ret;
 }
 
@@ -3873,39 +3926,144 @@ static int32_t sii8334_mhl_tx_remove(struct i2c_client *client)
 
 #ifdef CONFIG_MACH_LGE
     if(mhl_common_state){
-	  kfree(mhl_common_state);
-	  mhl_common_state = NULL;	 
+        kfree(mhl_common_state);
+        mhl_common_state = NULL;
      }
 #endif
 
 	return 0;
 }
 
-#ifndef CONFIG_MACH_LGE
+#ifdef CONFIG_MACH_LGE
 static int32_t sii8334_mhl_tx_suspend(struct i2c_client *client, pm_message_t mesg)
 {
     if (sii8334_mhl_suspended == true)
         return 0;
     sii8334_mhl_suspended = true;
     printk(KERN_INFO "[MHL]%s\n", __func__);
-	mhl_pdata[0]->power(0, 1);
+#if 0 /* keep power on */
+    mhl_pdata[0]->power(0, 1);
+#endif
+    disable_irq(sii8334_mhl_i2c_client[0]->irq);
 
     return 0;
 }
 
 static int32_t sii8334_mhl_tx_resume(struct i2c_client *client)
 {
-	int ret;
-
+#if 0 /* keep power on */
+    int ret;
+#endif
     if (sii8334_mhl_suspended == false)
         return 0;
 
-	sii8334_mhl_suspended = false;
-   	 printk(KERN_INFO "[MHL]%s\n", __func__);
-	ret = mhl_pdata[0]->power(1, 1);
-	if (ret > -1)
-		StartMhlTxDevice();
+    sii8334_mhl_suspended = false;
+    printk(KERN_INFO "[MHL]%s\n", __func__);
+#if 0 /* keep power on */
+    ret = mhl_pdata[0]->power(1, 1);
+    if (ret > -1)
+        StartMhlTxDevice();
+#endif
+    enable_irq(sii8334_mhl_i2c_client[0]->irq);
+
     return 0;
+}
+#endif
+
+/* LGE_CHANGE
+ * generate MHL touch event using procfs.
+ * USAGE : echo [action],[x],[y] > /proc/mhl_remocon
+ *    ex) echo 1,500,400 > /proc/mhl_remocon
+ * 2012-10-13, chaeuk.lee@lge.com
+ */
+#ifdef CONFIG_LGE_MHL_REMOCON_TEST
+#define PROC_CMD_MAX_LEN 20
+static int atoi(const char *name)
+{
+	int val = 0;
+
+	for (;; name++) {
+		switch (*name) {
+			case '0' ... '9':
+				val = 10*val+(*name-'0');
+				break;
+			default:
+				return val;
+		}
+	}
+}
+
+static int lge_mhl_remocon_write_proc(struct file *file, const char __user *buffer,
+		unsigned long count, void *data)
+{
+	char buf[PROC_CMD_MAX_LEN];
+	char x_pos[5];
+	char y_pos[5];
+	int action, x, y;
+	int ret;
+	int i = 0;
+	char *p;
+	char mbuf[120];
+
+	if (count >= PROC_CMD_MAX_LEN) {
+		ret = -EINVAL;
+		goto write_proc_failed;
+	}
+
+	if (copy_from_user(buf, buffer, PROC_CMD_MAX_LEN)) {
+		ret = -EFAULT;
+		goto write_proc_failed;
+	}
+
+	buf[count] = '\0';
+
+	if (buf[0] == '1') action = 1;
+	else if (buf[0] == '0') action = 0;
+	else if (buf[0] == '2') action = 2;
+	else action = -1;
+
+	p = &buf[2];
+	i = 0;
+	while(*p != ',') {
+		x_pos[i++] = *p++;
+	}
+	x_pos[i] = '\0';
+	p++;
+
+	i = 0;
+	while(*p) {
+		y_pos[i++] = *p++;
+	}
+	y_pos[i] = '\0';
+
+	x = atoi(x_pos);
+	y = atoi(y_pos);
+
+	printk("%s : action[%d], x[%d], y[%d]\n", __func__, action, x, y);
+	if (action == 2) {
+		memset(mbuf, 0, sizeof(mbuf));
+		pr_info("%s, MHL_REMOCON_TEST > action:%d, (%d,%d)\n", __func__, action, x, y);
+		sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", 1, x, y);
+		if(mhl_common_state->send_uevent)
+			mhl_common_state->send_uevent(mbuf);
+
+		memset(mbuf, 0, sizeof(mbuf));
+		pr_info("%s, MHL_REMOCON_TEST > action:%d, (%d,%d)\n", __func__, action, x, y);
+		sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", 0, x, y);
+		if(mhl_common_state->send_uevent)
+			mhl_common_state->send_uevent(mbuf);
+	} else {
+		memset(mbuf, 0, sizeof(mbuf));
+		pr_info("%s, MHL_REMOCON_TEST > action:%d, (%d,%d)\n", __func__, action, x, y);
+		sprintf(mbuf, "MHL_CTL action=%04d, x_pos=%04d, y_pos=%04d", action, x, y);
+		if(mhl_common_state->send_uevent)
+			mhl_common_state->send_uevent(mbuf);
+	}
+
+	return count;
+
+write_proc_failed:
+	return ret;
 }
 #endif
 
@@ -3920,7 +4078,7 @@ static struct i2c_driver sii8334_mhl_tx_i2c_driver = {
 	},
 	.probe = sii8334_mhl_tx_probe,
 	.remove = sii8334_mhl_tx_remove,
-#ifndef CONFIG_MACH_LGE
+#ifdef CONFIG_MACH_LGE
 	.suspend = sii8334_mhl_tx_suspend,
 	.resume = sii8334_mhl_tx_resume,
 #endif
@@ -3929,6 +4087,17 @@ static struct i2c_driver sii8334_mhl_tx_i2c_driver = {
 
 static int __init sii8334_mhl_tx_init(void)
 {
+#ifdef CONFIG_LGE_MHL_REMOCON_TEST
+	struct proc_dir_entry *d_entry;
+
+	d_entry = create_proc_entry("mhl_remocon",
+			S_IWUSR | S_IWGRP, NULL);
+	if (d_entry) {
+		d_entry->read_proc = NULL;
+		d_entry->write_proc = lge_mhl_remocon_write_proc;
+		d_entry->data = NULL;
+	}
+#endif
 	return i2c_add_driver(&sii8334_mhl_tx_i2c_driver);
 }
 

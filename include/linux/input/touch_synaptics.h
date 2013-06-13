@@ -28,6 +28,10 @@
 #define PAGE_SELECT_REG					0xFF		/* Button exists Page 02 */
 #define PAGE_MAX_NUM					4			/* number of page register */
 
+#ifndef CUST_G_TOUCH
+#define CUST_G_TOUCH
+#endif
+
 struct function_descriptor {
 	u8 	query_base;
 	u8 	command_base;
@@ -59,12 +63,30 @@ struct cur_touch_data {
 	struct button_data	button;
 };
 
+struct synaptics_ts_fw_info
+{
+	u8		fw_rev;
+	u8		fw_image_rev;
+	u8		manufacturer_id;
+	u8		product_id[11];
+#ifdef CUST_G_TOUCH
+	u8		syna_img_product_id[11];
+	u8		syna_img_fw_ver[5];
+#endif
+	u8		fw_image_product_id[11];
+	u8		config_id[5];
+	u8		image_config_id[5];
+	unsigned char	*fw_start;
+	unsigned long	fw_size;
+};
+#ifdef CUST_G_TOUCH
 struct interrupt_bit_mask {
 	u8 flash;
 	u8 status;
 	u8 abs;
 	u8 button;
 };
+#endif
 
 struct synaptics_ts_data {
 	u8	is_probed;
@@ -78,21 +100,35 @@ struct synaptics_ts_data {
 	struct ts_ic_function	analog_fc;	/* FIXME: not used in ClearPad3000 serise */
 	struct ts_ic_function	flash_fc;
 	struct cur_touch_data	ts_data;
-	struct touch_fw_info*	fw_info;
+	struct synaptics_ts_fw_info	fw_info;
+#ifdef CUST_G_TOUCH
 	struct interrupt_bit_mask	interrupt_mask;
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
 	u8	ic_panel_type;
 #endif
 };
 
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
-enum {IC7020_GFF, IC7020_G2, IC3203_G2, IC7020_GFF_H_PTN, IC7020_G2_H_PTN_LGIT, IC7020_G2_H_PTN_TPK};
+#ifdef CUST_G_TOUCH
+enum {
+	UNKNOWN,
+	G_IC7020_GFF, 
+	G_IC7020_G2, 
+	G_IC3203_G2, 
+	G_IC7020_G2_LGIT,
+	G_IC7020_G2_TPK,
+	GJ_IC7020_GFF_H_PTN,
+	GV_IC7020_G2_H_PTN_LGIT,
+	GV_IC7020_G2_H_PTN_TPK,
+	GK_IC7020_G1F,
+	GK_IC7020_GFF_SUNTEL,
+	GK_IC7020_GFF_LGIT,
+	GK_IC7020_GFF_LGIT_HYBRID,
+};
 #endif
 
 /* extern function */
 extern int FirmwareUpgrade(struct synaptics_ts_data *ts, const char* fw_path);
 int synaptics_ts_page_data_read(struct i2c_client *client, u8 page, u8 reg, int size, u8 *data);
-int ts_page_data_write(struct i2c_client *client, u8 page, u8 reg, int size, u8 *data);
+int synaptics_ts_page_data_write(struct i2c_client *client, u8 page, u8 reg, int size, u8 *data);
 int synaptics_ts_page_data_write_byte(struct i2c_client *client, u8 page, u8 reg, u8 data);
 
 #endif

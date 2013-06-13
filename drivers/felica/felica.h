@@ -1,6 +1,6 @@
 /*
  *  felica.h
- *  
+ *
  */
 #ifndef __FELICA_H__
 #define __FELICA_H__
@@ -11,7 +11,7 @@ extern "C" {
 
 /*
  *  INCLUDE FILES FOR MODULE
- *  
+ *
  */
 
 #include <linux/list.h>
@@ -20,7 +20,7 @@ extern "C" {
 
 /*
  *  DEFINE
- *  
+ *
  */
 
 #define IOCTL_FELICA_MAGIC 'T'

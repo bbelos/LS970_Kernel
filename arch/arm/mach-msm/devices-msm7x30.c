@@ -17,7 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/msm_rotator.h>
 #include <linux/dma-mapping.h>
-#include <linux/msm_kgsl.h>
+#include <mach/kgsl.h>
 #include <linux/android_pmem.h>
 #include <linux/regulator/machine.h>
 #include <linux/init.h>
@@ -26,9 +26,8 @@
 #include <mach/dma.h>
 #include <mach/board.h>
 #include <asm/clkdev.h>
-
+#include <linux/msm_ion.h>
 #include "devices.h"
-#include "gpio_hw.h"
 #include "footswitch.h"
 
 #include <asm/mach/flash.h>
@@ -42,6 +41,11 @@
 #include <mach/msm_memtypes.h>
 #include "pm.h"
 #include "irq.h"
+
+struct platform_device msm7x30_device_acpuclk = {
+	.name		= "acpuclk-7x30",
+	.id		= -1,
+};
 
 /* EBI THERMAL DRIVER */
 static struct resource msm_ebi0_thermal_resources[] = {
@@ -780,23 +784,25 @@ struct platform_device msm_device_dmov = {
 #define MSM_SDC4_BASE         0xA3100000
 static struct resource resources_sdc1[] = {
 	{
+		.name	= "core_mem",
 		.start	= MSM_SDC1_BASE,
 		.end	= MSM_SDC1_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name	= "core_irq",
 		.start	= INT_SDC1_0,
 		.end	= INT_SDC1_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC1_CHAN,
 		.end	= DMOV_SDC1_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC1_CRCI,
 		.end	= DMOV_SDC1_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -805,23 +811,25 @@ static struct resource resources_sdc1[] = {
 
 static struct resource resources_sdc2[] = {
 	{
+		.name   = "core_mem",
 		.start	= MSM_SDC2_BASE,
 		.end	= MSM_SDC2_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name	= "core_irq",
 		.start	= INT_SDC2_0,
 		.end	= INT_SDC2_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_NAND_CHAN,
 		.end	= DMOV_NAND_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC2_CRCI,
 		.end	= DMOV_SDC2_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -830,23 +838,25 @@ static struct resource resources_sdc2[] = {
 
 static struct resource resources_sdc3[] = {
 	{
+		.name   = "core_mem",
 		.start	= MSM_SDC3_BASE,
 		.end	= MSM_SDC3_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name	= "core_irq",
 		.start	= INT_SDC3_0,
 		.end	= INT_SDC3_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC3_CHAN,
 		.end	= DMOV_SDC3_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC3_CRCI,
 		.end	= DMOV_SDC3_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -855,23 +865,25 @@ static struct resource resources_sdc3[] = {
 
 static struct resource resources_sdc4[] = {
 	{
+		.name   = "core_mem",
 		.start	= MSM_SDC4_BASE,
 		.end	= MSM_SDC4_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name	= "core_irq",
 		.start	= INT_SDC4_0,
 		.end	= INT_SDC4_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC4_CHAN,
 		.end	= DMOV_SDC4_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC4_CRCI,
 		.end	= DMOV_SDC4_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -951,8 +963,8 @@ static struct resource msm_vidc_720p_resources[] = {
 };
 
 struct msm_vidc_platform_data vidc_platform_data = {
-	.memtype = MEMTYPE_EBI0,
-	.enable_ion = 0,
+	.memtype = ION_CAMERA_HEAP_ID,
+	.enable_ion = 1,
 	.disable_dmx = 0,
 	.cont_mode_dpb_count = 8
 };
@@ -1080,7 +1092,7 @@ static struct platform_device msm_ebi2_lcd_device = {
 	.resource       = msm_ebi2_lcd_resources,
 };
 
-static struct platform_device msm_lcdc_device = {
+struct platform_device msm_lcdc_device = {
 	.name   = "lcdc",
 	.id     = 0,
 };
@@ -1317,7 +1329,7 @@ static struct resource kgsl_2d0_resources[] = {
 static struct kgsl_device_platform_data kgsl_2d0_pdata = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 192000000,
+			.gpu_freq = 0,
 			.bus_freq = 192000000,
 		},
 	},

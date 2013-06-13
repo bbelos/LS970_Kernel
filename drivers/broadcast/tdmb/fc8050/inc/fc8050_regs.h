@@ -369,9 +369,8 @@ extern "C" {
 /* QCT DMA Max. transfer size is smaller than 4K-64, so FCI buffer must be 188x16, 4 buffers */
 /* 188x32 (6016) is not allowed in Qualcomm DMA */
 #define USE_QCT_DMA_LGE
-#ifndef USE_QCT_DMA_LGE
 #define CH0_BUF_THR 				(CH0_BUF_LENGTH/2-1) /* 188x32 2 buffers */
-#else
+#if 0
 #define CH0_BUF_THR 				(CH0_BUF_LENGTH/4-1) /* 188x16 4 buffers */
 #endif
 

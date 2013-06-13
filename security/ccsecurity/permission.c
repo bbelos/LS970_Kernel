@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2005-2012  NTT DATA CORPORATION
  *
- * Version: 1.8.3+   2012/02/29
+ * Version: 1.8.3+   2012/05/05
  */
 
 #include "internal.h"
@@ -252,9 +252,15 @@ static enum ccs_transition_type ccs_transition_type
  const struct ccs_path_info *program);
 static int __ccs_chmod_permission(struct dentry *dentry,
 				  struct vfsmount *vfsmnt, mode_t mode);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+static int __ccs_chown_permission(struct dentry *dentry,
+				  struct vfsmount *vfsmnt, kuid_t user,
+				  kgid_t group);
+#else
 static int __ccs_chown_permission(struct dentry *dentry,
 				  struct vfsmount *vfsmnt, uid_t user,
 				  gid_t group);
+#endif
 static int __ccs_chroot_permission(struct path *path);
 static int __ccs_fcntl_permission(struct file *file, unsigned int cmd,
 				  unsigned long arg);
@@ -590,35 +596,6 @@ static inline void skb_kill_datagram(struct sock *sk, struct sk_buff *skb,
 			clear = 1;
 		}
 		spin_unlock_irq(&sk->receive_queue.lock);
-		if (clear)
-			kfree_skb(skb);
-	}
-	skb_free_datagram(sk, skb);
-}
-
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 12)
-
-/**
- * skb_kill_datagram - Kill a datagram forcibly.
- *
- * @sk:    Pointer to "struct sock".
- * @skb:   Pointer to "struct sk_buff".
- * @flags: Flags passed to skb_recv_datagram().
- *
- * Returns nothing.
- */
-static inline void skb_kill_datagram(struct sock *sk, struct sk_buff *skb,
-				     int flags)
-{
-	/* Clear queue. */
-	if (flags & MSG_PEEK) {
-		int clear = 0;
-		spin_lock_irq(&sk->sk_receive_queue.lock);
-		if (skb == skb_peek(&sk->sk_receive_queue)) {
-			__skb_unlink(skb, &sk->sk_receive_queue);
-			clear = 1;
-		}
-		spin_unlock_irq(&sk->sk_receive_queue.lock);
 		if (clear)
 			kfree_skb(skb);
 	}
@@ -1248,12 +1225,31 @@ static int ccs_try_alt_exec(struct ccs_execve *ee)
 
 	/* Set argv[3] */
 	{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+		/*
+		 * Pass uid/gid seen from current user namespace, for these
+		 * values are used by programs in current user namespace in
+		 * order to decide whether to execve() or not (rather than by
+		 * auditing daemon in init's user namespace).
+		 */
+		snprintf(ee->tmp, CCS_EXEC_TMPSIZE - 1,
+			 "pid=%d uid=%d gid=%d euid=%d egid=%d suid=%d "
+			 "sgid=%d fsuid=%d fsgid=%d", ccs_sys_getpid(),
+			 __kuid_val(current_uid()), __kgid_val(current_gid()),
+			 __kuid_val(current_euid()),
+			 __kgid_val(current_egid()),
+			 __kuid_val(current_suid()),
+			 __kgid_val(current_sgid()),
+			 __kuid_val(current_fsuid()),
+			 __kgid_val(current_fsgid()));
+#else
 		snprintf(ee->tmp, CCS_EXEC_TMPSIZE - 1,
 			 "pid=%d uid=%d gid=%d euid=%d egid=%d suid=%d "
 			 "sgid=%d fsuid=%d fsgid=%d", ccs_sys_getpid(),
 			 current_uid(), current_gid(), current_euid(),
 			 current_egid(), current_suid(), current_sgid(),
 			 current_fsuid(), current_fsgid());
+#endif
 		retval = ccs_copy_argv(ee->tmp, bprm);
 		if (retval < 0)
 			goto out;
@@ -1398,9 +1394,9 @@ static bool ccs_find_execute_handler(struct ccs_execve *ee, const u8 type)
 #ifdef CONFIG_MMU
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 23)
 #define CCS_BPRM_MMU
-#elif defined(RHEL_MAJOR) && RHEL_MAJOR == 5
+#elif defined(RHEL_MAJOR) && RHEL_MAJOR == 5 && defined(RHEL_MINOR) && RHEL_MINOR >= 3
 #define CCS_BPRM_MMU
-#elif defined(AX_MAJOR) && AX_MAJOR == 3
+#elif defined(AX_MAJOR) && AX_MAJOR == 3 && defined(AX_MINOR) && AX_MINOR >= 2
 #define CCS_BPRM_MMU
 #endif
 #endif
@@ -1438,11 +1434,19 @@ bool ccs_dump_page(struct linux_binprm *bprm, unsigned long pos,
 		 * But remove_arg_zero() uses kmap_atomic()/kunmap_atomic().
 		 * So do I.
 		 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
+		char *kaddr = kmap_atomic(page);
+#else
 		char *kaddr = kmap_atomic(page, KM_USER0);
+#endif
 		dump->page = page;
 		memcpy(dump->data + offset, kaddr + offset,
 		       PAGE_SIZE - offset);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
+		kunmap_atomic(kaddr);
+#else
 		kunmap_atomic(kaddr, KM_USER0);
+#endif
 	}
 	/* Same with put_arg_page(page) in fs/exec.c */
 #ifdef CCS_BPRM_MMU
@@ -2557,6 +2561,34 @@ static int __ccs_chmod_permission(struct dentry *dentry,
 				    mode & S_IALLUGO);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+
+/**
+ * __ccs_chown_permission - Check permission for "chown/chgrp".
+ *
+ * @dentry: Pointer to "struct dentry".
+ * @vfsmnt: Pointer to "struct vfsmount". Maybe NULL.
+ * @user:   User ID.
+ * @group:  Group ID.
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
+static int __ccs_chown_permission(struct dentry *dentry,
+				  struct vfsmount *vfsmnt, kuid_t user,
+				  kgid_t group)
+{
+	int error = 0;
+	if (uid_valid(user))
+		error = ccs_path_number_perm(CCS_TYPE_CHOWN, dentry, vfsmnt,
+					     from_kuid(&init_user_ns, user));
+	if (!error && gid_valid(group))
+		error = ccs_path_number_perm(CCS_TYPE_CHGRP, dentry, vfsmnt,
+					     from_kgid(&init_user_ns, group));
+	return error;
+}
+
+#else
+
 /**
  * __ccs_chown_permission - Check permission for "chown/chgrp".
  *
@@ -2582,6 +2614,8 @@ static int __ccs_chown_permission(struct dentry *dentry,
 					     group);
 	return error;
 }
+
+#endif
 
 /**
  * __ccs_fcntl_permission - Check permission for changing O_APPEND flag.
@@ -3505,12 +3539,18 @@ out:
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
 		if (type == SOCK_DGRAM && family != PF_UNIX)
 			lock_sock(sk);
+#elif defined(RHEL_MAJOR) && RHEL_MAJOR == 5 && defined(RHEL_MINOR) && RHEL_MINOR >= 2
+		if (type == SOCK_DGRAM && family != PF_UNIX)
+			lock_sock(sk);
 #endif
 		skb_kill_datagram(sk, skb, flags);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
 		if (type == SOCK_DGRAM && family != PF_UNIX)
 			unlock_sock_fast(sk, slow);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
+		if (type == SOCK_DGRAM && family != PF_UNIX)
+			release_sock(sk);
+#elif defined(RHEL_MAJOR) && RHEL_MAJOR == 5 && defined(RHEL_MINOR) && RHEL_MINOR >= 2
 		if (type == SOCK_DGRAM && family != PF_UNIX)
 			release_sock(sk);
 #endif
@@ -4246,28 +4286,36 @@ bool ccs_condition(struct ccs_request_info *r,
 			unsigned long value = 0;
 			switch (index) {
 			case CCS_TASK_UID:
-				value = current_uid();
+				value = from_kuid(&init_user_ns,
+						  current_uid());
 				break;
 			case CCS_TASK_EUID:
-				value = current_euid();
+				value = from_kuid(&init_user_ns,
+						  current_euid());
 				break;
 			case CCS_TASK_SUID:
-				value = current_suid();
+				value = from_kuid(&init_user_ns,
+						  current_suid());
 				break;
 			case CCS_TASK_FSUID:
-				value = current_fsuid();
+				value = from_kuid(&init_user_ns,
+						  current_fsuid());
 				break;
 			case CCS_TASK_GID:
-				value = current_gid();
+				value = from_kgid(&init_user_ns,
+						  current_gid());
 				break;
 			case CCS_TASK_EGID:
-				value = current_egid();
+				value = from_kgid(&init_user_ns,
+						  current_egid());
 				break;
 			case CCS_TASK_SGID:
-				value = current_sgid();
+				value = from_kgid(&init_user_ns,
+						  current_sgid());
 				break;
 			case CCS_TASK_FSGID:
-				value = current_fsgid();
+				value = from_kgid(&init_user_ns,
+						  current_fsgid());
 				break;
 			case CCS_TASK_PID:
 				value = ccs_sys_getpid();
@@ -4408,13 +4456,17 @@ bool ccs_condition(struct ccs_request_info *r,
 					case CCS_PATH2_UID:
 					case CCS_PATH1_PARENT_UID:
 					case CCS_PATH2_PARENT_UID:
-						value = stat->uid;
+						value = from_kuid
+							(&init_user_ns,
+							 stat->uid);
 						break;
 					case CCS_PATH1_GID:
 					case CCS_PATH2_GID:
 					case CCS_PATH1_PARENT_GID:
 					case CCS_PATH2_PARENT_GID:
-						value = stat->gid;
+						value = from_kgid
+							(&init_user_ns,
+							 stat->gid);
 						break;
 					case CCS_PATH1_INO:
 					case CCS_PATH2_INO:

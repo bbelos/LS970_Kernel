@@ -15,11 +15,16 @@
 
 #include <mach/diag_bridge.h>
 
-int diagfwd_connect_hsic(int);
-int diagfwd_disconnect_hsic(int);
+#define N_MDM_WRITE	8
+#define N_MDM_READ	1
+
+#define NUM_HSIC_BUF_TBL_ENTRIES N_MDM_WRITE
+
+int diagfwd_connect_bridge(int);
+int diagfwd_disconnect_bridge(int);
 int diagfwd_write_complete_hsic(struct diag_request *);
 int diagfwd_cancel_hsic(void);
-void diagfwd_hsic_init(void);
-void diagfwd_hsic_exit(void);
+void diagfwd_bridge_init(void);
+void diagfwd_bridge_exit(void);
 
 #endif

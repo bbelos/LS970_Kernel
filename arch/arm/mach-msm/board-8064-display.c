@@ -13,13 +13,13 @@
 
 #include <linux/init.h>
 #include <linux/ioport.h>
+#include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
 #include <linux/ion.h>
 #include <asm/mach-types.h>
 #include <mach/msm_memtypes.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/gpiomux.h>
 #include <mach/ion.h>
 #include <mach/msm_bus_board.h>
@@ -58,10 +58,15 @@ static struct resource msm_fb_resources[] = {
 };
 
 #define LVDS_CHIMEI_PANEL_NAME "lvds_chimei_wxga"
+#define LVDS_FRC_PANEL_NAME "lvds_frc_fhd"
 #define MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME "mipi_video_toshiba_wsvga"
 #define MIPI_VIDEO_CHIMEI_WXGA_PANEL_NAME "mipi_video_chimei_wxga"
 #define HDMI_PANEL_NAME "hdmi_msm"
+#define MHL_PANEL_NAME "hdmi_msm,mhl_8334"
 #define TVOUT_PANEL_NAME "tvout_msm"
+
+#define LVDS_PIXEL_MAP_PATTERN_1	1
+#define LVDS_PIXEL_MAP_PATTERN_2	2
 
 #ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
 static unsigned char hdmi_is_primary = 1;
@@ -69,9 +74,16 @@ static unsigned char hdmi_is_primary = 1;
 static unsigned char hdmi_is_primary;
 #endif
 
+static unsigned char mhl_display_enabled;
+
 unsigned char apq8064_hdmi_as_primary_selected(void)
 {
 	return hdmi_is_primary;
+}
+
+unsigned char apq8064_mhl_display_enabled(void)
+{
+	return mhl_display_enabled;
 }
 
 static void set_mdp_clocks_for_wuxga(void);
@@ -98,12 +110,18 @@ static int msm_fb_detect_panel(const char *name)
 			strnlen(MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME,
 				PANEL_NAME_MAX_LEN)))
 			return 0;
-	} else if (machine_is_apq8064_cdp() ||
-		       machine_is_mpq8064_dtv()) {
+	} else if (machine_is_apq8064_cdp()) {
 		if (!strncmp(name, LVDS_CHIMEI_PANEL_NAME,
 			strnlen(LVDS_CHIMEI_PANEL_NAME,
 				PANEL_NAME_MAX_LEN)))
 			return 0;
+	} else if (machine_is_mpq8064_dtv()) {
+		if (!strncmp(name, LVDS_FRC_PANEL_NAME,
+			strnlen(LVDS_FRC_PANEL_NAME,
+			PANEL_NAME_MAX_LEN))) {
+			set_mdp_clocks_for_wuxga();
+			return 0;
+		}
 	}
 
 	if (!strncmp(name, HDMI_PANEL_NAME,
@@ -226,18 +244,9 @@ static struct msm_bus_scale_pdata mdp_bus_scale_pdata = {
 	.name = "mdp",
 };
 
-static int mdp_core_clk_rate_table[] = {
-	59080000,
-	128000000,
-	160000000,
-	200000000,
-};
-
 static struct msm_panel_common_pdata mdp_pdata = {
 	.gpio = MDP_VSYNC_GPIO,
-	.mdp_core_clk_rate = 59080000,
-	.mdp_core_clk_table = mdp_core_clk_rate_table,
-	.num_mdp_clk = ARRAY_SIZE(mdp_core_clk_rate_table),
+	.mdp_max_clk = 266667000,
 	.mdp_bus_scale_table = &mdp_bus_scale_pdata,
 	.mdp_rev = MDP_REV_44,
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
@@ -459,7 +468,11 @@ static int mipi_dsi_panel_power(int on)
 
 		gpio_set_value_cansleep(gpio36, 0);
 		gpio_set_value_cansleep(gpio25, 1);
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio26, 1);
 	} else {
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio26, 0);
 		gpio_set_value_cansleep(gpio25, 0);
 		gpio_set_value_cansleep(gpio36, 1);
 
@@ -497,7 +510,7 @@ static int mipi_dsi_panel_power(int on)
 }
 
 static struct mipi_dsi_platform_data mipi_dsi_pdata = {
-	.dsi_power_save = mipi_dsi_panel_power,
+	.dsi_power_save = mipi_dsi_panel_power, 
 };
 
 static bool lvds_power_on;
@@ -590,7 +603,11 @@ static int lvds_panel_power(int on)
 
 		gpio_set_value_cansleep(gpio36, 0);
 		gpio_set_value_cansleep(mpp3, 1);
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio26, 1);
 	} else {
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio26, 0);
 		gpio_set_value_cansleep(mpp3, 0);
 		gpio_set_value_cansleep(gpio36, 1);
 
@@ -616,12 +633,17 @@ static int lvds_panel_power(int on)
 
 static int lvds_pixel_remap(void)
 {
+	u32 ver = socinfo_get_version();
+
 	if (machine_is_apq8064_cdp() ||
 	    machine_is_apq8064_liquid()) {
-		u32 ver = socinfo_get_version();
 		if ((SOCINFO_VERSION_MAJOR(ver) == 1) &&
 		    (SOCINFO_VERSION_MINOR(ver) == 0))
-			return 1;
+			return LVDS_PIXEL_MAP_PATTERN_1;
+	} else if (machine_is_mpq8064_dtv()) {
+		if ((SOCINFO_VERSION_MAJOR(ver) == 1) &&
+		    (SOCINFO_VERSION_MINOR(ver) == 0))
+			return LVDS_PIXEL_MAP_PATTERN_2;
 	}
 	return 0;
 }
@@ -643,6 +665,23 @@ static struct platform_device lvds_chimei_panel_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &lvds_chimei_pdata,
+	}
+};
+
+#define FRC_GPIO_UPDATE	(SX150X_EXP4_GPIO_BASE + 8)
+#define FRC_GPIO_RESET	(SX150X_EXP4_GPIO_BASE + 9)
+#define FRC_GPIO_PWR	(SX150X_EXP4_GPIO_BASE + 10)
+
+static int lvds_frc_gpio[] = {FRC_GPIO_UPDATE, FRC_GPIO_RESET, FRC_GPIO_PWR};
+static struct lvds_panel_platform_data lvds_frc_pdata = {
+	.gpio = lvds_frc_gpio,
+};
+
+static struct platform_device lvds_frc_panel_device = {
+	.name = "lvds_frc_fhd",
+	.id = 0,
+	.dev = {
+		.platform_data = &lvds_frc_pdata,
 	}
 };
 
@@ -978,6 +1017,8 @@ void __init apq8064_init_fb(void)
 		platform_device_register(&mipi_dsi2lvds_bridge_device);
 	if (machine_is_apq8064_mtp())
 		platform_device_register(&mipi_dsi_toshiba_panel_device);
+	if (machine_is_mpq8064_dtv())
+		platform_device_register(&lvds_frc_panel_device);
 
 	msm_fb_register_device("mdp", &mdp_pdata);
 	msm_fb_register_device("lvds", &lvds_pdata);
@@ -992,8 +1033,6 @@ void __init apq8064_init_fb(void)
  */
 static void set_mdp_clocks_for_wuxga(void)
 {
-	int i;
-
 	mdp_ui_vectors[0].ab = 2000000000;
 	mdp_ui_vectors[0].ib = 2000000000;
 	mdp_vga_vectors[0].ab = 2000000000;
@@ -1003,18 +1042,14 @@ static void set_mdp_clocks_for_wuxga(void)
 	mdp_1080p_vectors[0].ab = 2000000000;
 	mdp_1080p_vectors[0].ib = 2000000000;
 
-	mdp_pdata.mdp_core_clk_rate = 200000000;
-
-	for (i = 0; i < ARRAY_SIZE(mdp_core_clk_rate_table); i++)
-		mdp_core_clk_rate_table[i] = 200000000;
-
 	if (apq8064_hdmi_as_primary_selected()) {
 		dtv_bus_def_vectors[0].ab = 2000000000;
 		dtv_bus_def_vectors[0].ib = 2000000000;
 	}
 }
 
-void __init apq8064_set_display_params(char *prim_panel, char *ext_panel)
+void __init apq8064_set_display_params(char *prim_panel, char *ext_panel,
+		unsigned char resolution)
 {
 	/*
 	 * For certain MPQ boards, HDMI should be set as primary display
@@ -1048,5 +1083,15 @@ void __init apq8064_set_display_params(char *prim_panel, char *ext_panel)
 			PANEL_NAME_MAX_LEN);
 		pr_debug("msm_fb_pdata.ext_panel_name %s\n",
 			msm_fb_pdata.ext_panel_name);
+
+		if (!strncmp((char *)msm_fb_pdata.ext_panel_name,
+			MHL_PANEL_NAME, strnlen(MHL_PANEL_NAME,
+				PANEL_NAME_MAX_LEN))) {
+			pr_debug("MHL is external display by boot parameter\n");
+			mhl_display_enabled = 1;
+		}
 	}
+
+	msm_fb_pdata.ext_resolution = resolution;
+	hdmi_msm_data.is_mhl_enabled = mhl_display_enabled;
 }

@@ -39,6 +39,7 @@
 #include <linux/mutex.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
+#include <linux/interrupt.h>
 
 #include <net/sock.h>
 #include <linux/uaccess.h>
@@ -54,8 +55,8 @@
  * 1 Byte FCS */
 #define RFCOMM_HDR_SIZE 6
 
-static int disable_cfc;
-static int l2cap_ertm;
+static bool disable_cfc;
+static bool l2cap_ertm;
 static int channel_mtu = -1;
 static unsigned int l2cap_mtu = RFCOMM_MAX_L2CAP_MTU;
 
@@ -137,6 +138,21 @@ static inline void rfcomm_schedule(void)
 
 static inline void rfcomm_session_put(struct rfcomm_session *s)
 {
+	bool match = false;
+	struct rfcomm_session *sess;
+	struct list_head *p, *n;
+	list_for_each_safe(p, n, &session_list) {
+		sess = list_entry(p, struct rfcomm_session, list);
+		if (s == sess) {
+			match = true;
+			break;
+		}
+	}
+	if (!match) {
+		BT_ERR("session already freed previously");
+		dump_stack();
+		return;
+	}
 	if (atomic_dec_and_test(&s->refcnt))
 		rfcomm_session_del(s);
 }

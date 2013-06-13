@@ -10,6 +10,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/export.h>
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 
@@ -367,18 +368,19 @@ int mmc_spi_set_crc(struct mmc_host *host, int use_crc)
 }
 
 /**
- *	mmc_switch - modify EXT_CSD register
+ *	__mmc_switch - modify EXT_CSD register
  *	@card: the MMC card associated with the data transfer
  *	@set: cmd set values
  *	@index: EXT_CSD register index
  *	@value: value to program into EXT_CSD register
  *	@timeout_ms: timeout (ms) for operation performed by register write,
  *                   timeout of zero implies maximum possible timeout
+ *	@use_busy_signal: use the busy signal as response type
  *
  *	Modifies the EXT_CSD register for selected card.
  */
-int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
-	       unsigned int timeout_ms)
+int __mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
+	       unsigned int timeout_ms, bool use_busy_signal)
 {
 	int err;
 	struct mmc_command cmd = {0};
@@ -392,23 +394,23 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
 		  (index << 16) |
 		  (value << 8) |
 		  set;
-		cmd.flags = MMC_CMD_AC;
-	if (index == EXT_CSD_BKOPS_START &&
-	    card->ext_csd.raw_bkops_status < EXT_CSD_BKOPS_LEVEL_2)
-		cmd.flags |= MMC_RSP_SPI_R1 | MMC_RSP_R1;
-	else
+	cmd.flags = MMC_CMD_AC;
+	if (use_busy_signal)
 		cmd.flags |= MMC_RSP_SPI_R1B | MMC_RSP_R1B;
+	else
+		cmd.flags |= MMC_RSP_SPI_R1 | MMC_RSP_R1;
+
+
 	cmd.cmd_timeout_ms = timeout_ms;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
 	if (err)
 		return err;
 
-	/* No need to check card status in case of BKOPS switch*/
-	if (index == EXT_CSD_BKOPS_START)
+	/* No need to check card status in case of unblocking command */
+	if (!use_busy_signal)
 		return 0;
 
-	mmc_delay(1);
 	/* Must check status to be sure of no errors */
 	do {
 		err = mmc_send_status(card, &status);
@@ -425,13 +427,20 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
 			return -EBADMSG;
 	} else {
 		if (status & 0xFDFFA000)
-			printk(KERN_WARNING "%s: unexpected status %#x after "
+			pr_warning("%s: unexpected status %#x after "
 			       "switch", mmc_hostname(card->host), status);
 		if (status & R1_SWITCH_ERROR)
 			return -EBADMSG;
 	}
 
 	return 0;
+}
+EXPORT_SYMBOL_GPL(__mmc_switch);
+
+int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
+		unsigned int timeout_ms)
+{
+	return __mmc_switch(card, set, index, value, timeout_ms, true);
 }
 EXPORT_SYMBOL_GPL(mmc_switch);
 
@@ -487,7 +496,7 @@ mmc_send_bus_test(struct mmc_card *card, struct mmc_host *host, u8 opcode,
 	else if (len == 4)
 		test_buf = testdata_4bit;
 	else {
-		printk(KERN_ERR "%s: Invalid bus_width %d\n",
+		pr_err("%s: Invalid bus_width %d\n",
 		       mmc_hostname(host), len);
 		kfree(data_buf);
 		return -EINVAL;
@@ -566,18 +575,22 @@ int mmc_send_hpi_cmd(struct mmc_card *card, u32 *status)
 {
 	struct mmc_command cmd = {0};
 	unsigned int opcode;
-	unsigned int flags = MMC_CMD_AC;
 	int err;
+
+	if (!card->ext_csd.hpi) {
+		pr_warning("%s: Card didn't support HPI command\n",
+			   mmc_hostname(card->host));
+		return -EINVAL;
+	}
 
 	opcode = card->ext_csd.hpi_cmd;
 	if (opcode == MMC_STOP_TRANSMISSION)
-		flags |= MMC_RSP_R1B;
+		cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
 	else if (opcode == MMC_SEND_STATUS)
-		flags |= MMC_RSP_R1;
+		cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 
 	cmd.opcode = opcode;
 	cmd.arg = card->rca << 16 | 1;
-	cmd.flags = flags;
 	cmd.cmd_timeout_ms = card->ext_csd.out_of_int_time;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, 0);

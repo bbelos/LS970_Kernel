@@ -18,59 +18,95 @@
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <mach/mpm.h>
-#include "rpm_resources.h"
+#include "lpm_resources.h"
+#include "pm.h"
+#include "rpm-notifier.h"
 
 static struct msm_rpmrs_level *msm_lpm_levels;
 static int msm_lpm_level_count;
 
-int msm_rpmrs_enter_sleep(uint32_t sclk_count, struct msm_rpmrs_limits *limits,
+static void msm_lpm_level_update(void)
+{
+	unsigned int lpm_level;
+	struct msm_rpmrs_level *level = NULL;
+
+	for (lpm_level = 0; lpm_level < msm_lpm_level_count; lpm_level++) {
+		level = &msm_lpm_levels[lpm_level];
+		level->available =
+			!msm_lpm_level_beyond_limit(&level->rs_limits);
+	}
+}
+
+int msm_lpm_enter_sleep(uint32_t sclk_count, void *limits,
 		bool from_idle, bool notify_rpm)
 {
-	/* TODO */
-	return 0;
+	int ret = 0;
+	struct msm_rpmrs_limits *l = (struct msm_rpmrs_limits *)limits;
+
+	ret = msm_rpm_enter_sleep();
+	if (ret) {
+		pr_warn("%s(): RPM failed to enter sleep err:%d\n",
+				__func__, ret);
+		goto bail;
+	}
+	ret = msm_lpmrs_enter_sleep(sclk_count, l, from_idle, notify_rpm);
+bail:
+	return ret;
 }
 
-void msm_rpmrs_exit_sleep(struct msm_rpmrs_limits *limits, bool from_idle,
+static void msm_lpm_exit_sleep(void *limits, bool from_idle,
 		bool notify_rpm, bool collapsed)
 {
-	/* TODO */
-	return;
+	msm_rpm_exit_sleep();
+	msm_lpmrs_exit_sleep((struct msm_rpmrs_limits *)limits,
+				from_idle, notify_rpm, collapsed);
 }
 
-static bool msm_rpmrs_irqs_detectable(struct msm_rpmrs_limits *limits,
-		bool irqs_detect, bool gpio_detect)
-{
-	/* TODO */
-	return true;
-}
-
-void msm_rpmrs_show_resources(void)
+void msm_lpm_show_resources(void)
 {
 	/* TODO */
 	return;
 }
 
-struct msm_rpmrs_limits *msm_rpmrs_lowest_limits(
-	bool from_idle, enum msm_pm_sleep_mode sleep_mode, uint32_t latency_us,
-	uint32_t sleep_us)
+s32 msm_cpuidle_get_deep_idle_latency(void)
+{
+	int i;
+	struct msm_rpmrs_level *level = msm_lpm_levels, *best = level;
+
+	if (!level)
+		return 0;
+
+	for (i = 0; i < msm_lpm_level_count; i++, level++) {
+		if (!level->available)
+			continue;
+		if (level->sleep_mode != MSM_PM_SLEEP_MODE_POWER_COLLAPSE)
+			continue;
+		/* Pick the first power collapse mode by default */
+		if (best->sleep_mode != MSM_PM_SLEEP_MODE_POWER_COLLAPSE)
+			best = level;
+		/* Find the lowest latency for power collapse */
+		if (level->latency_us < best->latency_us)
+			best = level;
+	}
+	return best->latency_us - 1;
+}
+
+static void *msm_lpm_lowest_limits(bool from_idle,
+		enum msm_pm_sleep_mode sleep_mode,
+		struct msm_pm_time_params *time_param, uint32_t *power)
 {
 	unsigned int cpu = smp_processor_id();
 	struct msm_rpmrs_level *best_level = NULL;
-	bool irqs_detectable = false;
-	bool gpio_detectable = false;
+	uint32_t pwr;
 	int i;
 
 	if (!msm_lpm_levels)
 		return NULL;
 
-	if (sleep_mode == MSM_PM_SLEEP_MODE_POWER_COLLAPSE) {
-		irqs_detectable = msm_mpm_irqs_detectable(from_idle);
-		gpio_detectable = msm_mpm_gpio_irqs_detectable(from_idle);
-	}
+	msm_lpm_level_update();
 
 	for (i = 0; i < msm_lpm_level_count; i++) {
 		struct msm_rpmrs_level *level = &msm_lpm_levels[i];
-		uint32_t power;
 
 		if (!level->available)
 			continue;
@@ -78,36 +114,42 @@ struct msm_rpmrs_limits *msm_rpmrs_lowest_limits(
 		if (sleep_mode != level->sleep_mode)
 			continue;
 
-		if (latency_us < level->latency_us)
+		if (time_param->latency_us < level->latency_us)
 			continue;
 
-		if (!msm_rpmrs_irqs_detectable(&level->rs_limits,
-					irqs_detectable, gpio_detectable))
-			continue;
-
-		if (sleep_us <= 1) {
-			power = level->energy_overhead;
-		} else if (sleep_us <= level->time_overhead_us) {
-			power = level->energy_overhead / sleep_us;
-		} else if ((sleep_us >> 10) > level->time_overhead_us) {
-			power = level->steady_state_power;
+		if (time_param->sleep_us <= 1) {
+			pwr = level->energy_overhead;
+		} else if (time_param->sleep_us <= level->time_overhead_us) {
+			pwr = level->energy_overhead / time_param->sleep_us;
+		} else if ((time_param->sleep_us >> 10)
+				> level->time_overhead_us) {
+			pwr = level->steady_state_power;
 		} else {
-			power = level->steady_state_power;
-			power -= (level->time_overhead_us *
-					level->steady_state_power)/sleep_us;
-			power += level->energy_overhead / sleep_us;
+			pwr = level->steady_state_power;
+			pwr -= (level->time_overhead_us *
+				level->steady_state_power) /
+						time_param->sleep_us;
+			pwr += level->energy_overhead / time_param->sleep_us;
 		}
 
-		if (!best_level ||
-				best_level->rs_limits.power[cpu] >= power) {
+		if (!best_level || best_level->rs_limits.power[cpu] >= pwr) {
+
 			level->rs_limits.latency_us[cpu] = level->latency_us;
-			level->rs_limits.power[cpu] = power;
+			level->rs_limits.power[cpu] = pwr;
 			best_level = level;
+
+			if (power)
+				*power = pwr;
 		}
 	}
 
 	return best_level ? &best_level->rs_limits : NULL;
 }
+static struct msm_pm_sleep_ops msm_lpm_ops = {
+	.lowest_limits = msm_lpm_lowest_limits,
+	.enter_sleep = msm_lpm_enter_sleep,
+	.exit_sleep = msm_lpm_exit_sleep,
+};
 
 static int __devinit msm_lpm_levels_probe(struct platform_device *pdev)
 {
@@ -160,7 +202,7 @@ static int __devinit msm_lpm_levels_probe(struct platform_device *pdev)
 		ret = of_property_read_u32(node, key, &val);
 		if (ret)
 			goto fail;
-		level->rs_limits.vdd_dig = val;
+		level->rs_limits.vdd_dig_lower_bound = val;
 
 		key = "qcom,vdd-mem-upper-bound";
 		ret = of_property_read_u32(node, key, &val);
@@ -172,7 +214,7 @@ static int __devinit msm_lpm_levels_probe(struct platform_device *pdev)
 		ret = of_property_read_u32(node, key, &val);
 		if (ret)
 			goto fail;
-		level->rs_limits.vdd_mem = val;
+		level->rs_limits.vdd_mem_lower_bound = val;
 
 		key = "qcom,latency-us";
 		ret = of_property_read_u32(node, key, &val);
@@ -203,6 +245,8 @@ static int __devinit msm_lpm_levels_probe(struct platform_device *pdev)
 
 	msm_lpm_levels = levels;
 	msm_lpm_level_count = idx;
+
+	msm_pm_set_sleep_ops(&msm_lpm_ops);
 
 	return 0;
 fail:

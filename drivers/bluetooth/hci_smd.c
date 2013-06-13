@@ -28,6 +28,7 @@
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
 #include <linux/uaccess.h>
+#include <linux/interrupt.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/hci.h>

@@ -50,9 +50,6 @@
 #include <linux/uaccess.h>
 #include <linux/module.h>
 
-#include <asm/system.h>
-#include <mach/mdm-peripheral.h>
-
 
 /* number of characters left in xmit buffer before select has we have room */
 #define WAKEUP_CHARS 256
@@ -63,7 +60,7 @@
  * controlling the space in the read buffer.
  */
 #define TTY_THRESHOLD_THROTTLE		128 /* now based on remaining room */
-#define TTY_THRESHOLD_UNTHROTTLE 	128
+#define TTY_THRESHOLD_UNTHROTTLE	128
 
 /*
  * Special byte codes used in the echo buffer to represent operations
@@ -111,10 +108,9 @@ static void n_tty_set_room(struct tty_struct *tty)
 	tty->receive_room = left;
 
 	/* Did this open up the receive buffer? We may need to flip */
-	if (left && !old_left) 
-		schedule_work(&tty->buf.work);	
+	if (left && !old_left)
+		schedule_work(&tty->buf.work);
 }
-
 
 static void put_tty_queue_nolock(unsigned char c, struct tty_struct *tty)
 {
@@ -188,7 +184,6 @@ static void reset_buffer_flags(struct tty_struct *tty)
 	tty->canon_head = tty->canon_data = tty->erasing = 0;
 	memset(&tty->read_flags, 0, sizeof tty->read_flags);
 	n_tty_set_room(tty);
-	check_unthrottle(tty);
 }
 
 /**
@@ -409,7 +404,7 @@ static ssize_t process_output_block(struct tty_struct *tty,
 				    const unsigned char *buf, unsigned int nr)
 {
 	int	space;
-	int 	i;
+	int	i;
 	const unsigned char *cp;
 
 	mutex_lock(&tty->output_lock);
@@ -1380,10 +1375,6 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 		i = min(N_TTY_BUF_SIZE - tty->read_cnt,
 			N_TTY_BUF_SIZE - tty->read_head);
 		i = min(count, i);
-		if(tty->start_debug){
-			dbg_log_event(NULL, "n_t_r_b:1.tty->read_head",tty->read_head, "tty->read_cnt", tty->read_cnt,
-				"i", i);
-		}
 		memcpy(tty->read_buf + tty->read_head, cp, i);
 		tty->read_head = (tty->read_head + i) & (N_TTY_BUF_SIZE-1);
 		tty->read_cnt += i;
@@ -1393,11 +1384,6 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 		i = min(N_TTY_BUF_SIZE - tty->read_cnt,
 			N_TTY_BUF_SIZE - tty->read_head);
 		i = min(count, i);
-
-		if(tty->start_debug){
-			dbg_log_event(NULL, "n_t_r_b:2.tty->read_head",tty->read_head, "tty->read_cnt", tty->read_cnt,
-				"i", i);
-		}
 		memcpy(tty->read_buf + tty->read_head, cp, i);
 		tty->read_head = (tty->read_head + i) & (N_TTY_BUF_SIZE-1);
 		tty->read_cnt += i;
@@ -1435,8 +1421,6 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	if ((!tty->icanon && (tty->read_cnt >= tty->minimum_to_wake)) ||
 		L_EXTPROC(tty)) {
 		kill_fasync(&tty->fasync, SIGIO, POLL_IN);
-		if(tty->start_debug)
-			dbg_log_event(NULL, "n_t_r_b:wake_q_active",waitqueue_active(&tty->read_wait),"", 0, "", 0);
 		if (waitqueue_active(&tty->read_wait))
 			wake_up_interruptible(&tty->read_wait);
 	}
@@ -1601,6 +1585,7 @@ static int n_tty_open(struct tty_struct *tty)
 			return -ENOMEM;
 	}
 	reset_buffer_flags(tty);
+	tty_unthrottle(tty);
 	tty->column = 0;
 	n_tty_set_termios(tty, NULL);
 	tty->minimum_to_wake = 1;
@@ -1621,7 +1606,7 @@ static inline int input_available_p(struct tty_struct *tty, int amt)
 }
 
 /**
- * 	copy_from_read_buf	-	copy read data directly
+ *	copy_from_read_buf	-	copy read data directly
  *	@tty: terminal device
  *	@b: user data
  *	@nr: size of data
@@ -1654,18 +1639,10 @@ static int copy_from_read_buf(struct tty_struct *tty,
 	if (n) {
 		retval = copy_to_user(*b, &tty->read_buf[tty->read_tail], n);
 		n -= retval;
-		tty->n_tty_cnt+=n;
 		tty_audit_add_data(tty, &tty->read_buf[tty->read_tail], n);
 		spin_lock_irqsave(&tty->read_lock, flags);
 		tty->read_tail = (tty->read_tail + n) & (N_TTY_BUF_SIZE-1);
 		tty->read_cnt -= n;
-		if(tty->start_debug) {
-			if (retval < 0)
-				dbg_log_event(NULL, "cp_frm_r_buf:retval", retval, "", 0, "", 0);
-			else
-				dbg_log_event(NULL, "cp_frm_r_buf:read_tail",tty->read_tail, "n", n, "read_cnt", tty->read_cnt);
-			
-		}
 		/* Turn single EOF into zero-length read */
 		if (L_EXTPROC(tty) && tty->icanon && n == 1) {
 			if (!tty->read_cnt && (*b)[n-1] == EOF_CHAR(tty))
@@ -1747,8 +1724,6 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file,
 	long timeout;
 	unsigned long flags;
 	int packet;
-	struct tty_buffer *head;
-	int count;
 
 do_it_again:
 
@@ -1816,11 +1791,8 @@ do_it_again:
 		set_current_state(TASK_INTERRUPTIBLE);
 
 		if (((minimum - (b - buf)) < tty->minimum_to_wake) &&
-		    ((minimum - (b - buf)) >= 1)) {
-		    pr_info("%s:****tty->minimum_to_wake=%d\n", __func__, 
-				tty->minimum_to_wake);
+		    ((minimum - (b - buf)) >= 1))
 			tty->minimum_to_wake = (minimum - (b - buf));
-		}
 
 		if (!input_available_p(tty, 0)) {
 			if (test_bit(TTY_OTHER_CLOSED, &tty->flags)) {
@@ -1936,24 +1908,9 @@ do_it_again:
 		if (nr)
 			clear_bit(TTY_PUSH, &tty->flags);
 	} else if (test_and_clear_bit(TTY_PUSH, &tty->flags))
-		 goto do_it_again;
+		goto do_it_again;
 
 	n_tty_set_room(tty);
-	
-	if(tty->update_room_in_ldisc){
-		spin_lock_irqsave(&tty->buf.lock, flags);
-
-		head = tty->buf.head;
-		if (!head) {
-			count = head->commit - head->read;
-
-			if (count && tty->receive_room && !work_pending(&tty->buf.work))
-				schedule_work(&tty->buf.work);
-
-		}
-
-		spin_unlock_irqrestore(&tty->buf.lock, flags);
-	}
 	return retval;
 }
 

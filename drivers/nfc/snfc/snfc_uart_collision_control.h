@@ -9,6 +9,7 @@
  */
 #include "snfc_common.h"
 #include "snfc_gpio.h"
+#include "snfc_i2c.h"
 
  /*
  *	Defines
@@ -25,9 +26,11 @@
 #define IOCTL_SNFC_HSEL_DOWN			_IO(IOCTL_SNFC_MAGIC,7)
 #define IOCTL_SNFC_PON_UP				_IO(IOCTL_SNFC_MAGIC,8)
 #define IOCTL_SNFC_PON_DOWN				_IO(IOCTL_SNFC_MAGIC,9)
-#define IOCTL_SNFC_END					_IO(IOCTL_SNFC_MAGIC,10)
+#define IOCTL_SNFC_BOOT_CEN_HI			_IO(IOCTL_SNFC_MAGIC,10)
+#define IOCTL_SNFC_BOOT_CEN_LO			_IO(IOCTL_SNFC_MAGIC,11)
+#define IOCTL_SNFC_END					_IO(IOCTL_SNFC_MAGIC,12)
 
-#define IOCTL_SNFC_MAXNR			10
+#define IOCTL_SNFC_MAXNR			12
 
 typedef enum _e_snfc_uart_status {
 	UART_STATUS_KOTO_OFF = 0,

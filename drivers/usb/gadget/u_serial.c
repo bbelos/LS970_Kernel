@@ -25,6 +25,7 @@
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/slab.h>
+#include <linux/export.h>
 #include <linux/debugfs.h>
 
 #include "u_serial.h"
@@ -78,11 +79,13 @@
  * next layer of buffering.  For TX that's a circular buffer; for RX
  * consider it a NOP.  A third layer is provided by the TTY code.
  */
+#ifdef CONFIG_USB_G_LGE_ANDROID
 #define TX_QUEUE_SIZE		16
 #define TX_BUF_SIZE		4096
-#ifdef CONFIG_USB_G_LGE_ANDROID
 #define WRITE_BUF_SIZE		(8192+1)		/* TX only */
 #else
+#define TX_QUEUE_SIZE		8
+#define TX_BUF_SIZE		4096
 #define WRITE_BUF_SIZE		8192		/* TX only */
 #endif
 
@@ -618,19 +621,11 @@ recycle:
 		port->read_started--;
 	}
 
-	/* Push from tty to ldisc; this is immediate with low_latency, and
-	 * may trigger callbacks to this driver ... so drop the spinlock.
+	/* Push from tty to ldisc; without low_latency set this is handled by
+	 * a workqueue, so we won't get callbacks and can hold port_lock
 	 */
-	if (tty && do_push) {
-		spin_unlock_irq(&port->port_lock);
+	if (tty && do_push)
 		tty_flip_buffer_push(tty);
-		wake_up_interruptible(&tty->read_wait);
-		spin_lock_irq(&port->port_lock);
-
-		/* tty may have been closed */
-		tty = port->port_tty;
-	}
-
 
 	/* We want our data queue to become empty ASAP, keeping data
 	 * in the tty and ldisc (not here).  If we couldn't push any
@@ -811,9 +806,6 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 	struct gs_port	*port;
 	int		status;
 
-	if (port_num < 0 || port_num >= n_ports)
-		return -ENXIO;
-
 	do {
 		mutex_lock(&ports[port_num].lock);
 		port = ports[port_num].port;
@@ -886,13 +878,6 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 
 	port->open_count = 1;
 	port->openclose = false;
-
-	/* low_latency means ldiscs work is carried in the same context
-	 * of tty_flip_buffer_push. The same can be called from IRQ with
-	 * low_latency = 0. But better to use a dedicated worker thread
-	 * to push the data.
-	 */
-	tty->low_latency = 1;
 
 	/* if connected, start the I/O stream */
 	if (port->port_usb) {
@@ -1044,6 +1029,10 @@ static void gs_flush_chars(struct tty_struct *tty)
 	struct gs_port	*port = tty->driver_data;
 	unsigned long	flags;
 
+#ifdef CONFIG_USB_G_LGE_ANDROID
+	if(!port)
+		return;
+#endif
 	pr_vdebug("gs_flush_chars: (%d,%p)\n", port->port_num, tty);
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -1058,6 +1047,10 @@ static int gs_write_room(struct tty_struct *tty)
 	unsigned long	flags;
 	int		room = 0;
 
+#ifdef CONFIG_USB_G_LGE_ANDROID
+	if(!port)
+		return room;
+#endif
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (port->port_usb)
 		room = gs_buf_space_avail(&port->port_write_buf);
@@ -1386,7 +1379,6 @@ int gserial_setup(struct usb_gadget *g, unsigned count)
 	if (!gs_tty_driver)
 		return -ENOMEM;
 
-	gs_tty_driver->owner = THIS_MODULE;
 	gs_tty_driver->driver_name = "g_serial";
 	gs_tty_driver->name = PREFIX;
 	/* uses dynamically assigned dev_t values */

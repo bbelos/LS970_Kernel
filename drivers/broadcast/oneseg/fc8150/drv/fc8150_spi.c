@@ -8,7 +8,7 @@
 *******************************************************************************/
 #include <linux/spi/spi.h>
 #include <linux/slab.h>
-
+#include <linux/module.h> 
 #include "fci_types.h"
 #include "fc8150_regs.h"
 #include "fci_oal.h"

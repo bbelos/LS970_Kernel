@@ -20,11 +20,11 @@
 #include <linux/uaccess.h>
 #include <linux/ratelimit.h>
 #include <mach/usb_bridge.h>
-#ifdef CONFIG_LGE_EMS_CH
-#include <mach/hsic_debug_ch.h>
+#ifdef CONFIG_USB_LGE_DDM_BRIDGE
+#include <mach/ddm_bridge.h>
 #endif
 
-#define MAX_RX_URBS			50
+#define MAX_RX_URBS			100
 #define RMNET_RX_BUFSIZE		2048
 
 #define STOP_SUBMIT_URB_LIMIT		500
@@ -120,10 +120,7 @@ static inline  bool rx_halted(struct data_bridge *dev)
 
 static inline bool rx_throttled(struct bridge *brdg)
 {
-	if (brdg)
-		return test_bit(RX_THROTTLED, &brdg->flags);
-	else
-		return 0;
+	return test_bit(RX_THROTTLED, &brdg->flags);
 }
 
 int data_bridge_unthrottle_rx(unsigned int id)
@@ -156,14 +153,10 @@ static void data_bridge_process_rx(struct work_struct *work)
 
 	struct bridge		*brdg = dev->brdg;
 
+	if (!brdg || !brdg->ops.send_pkt || rx_halted(dev))
+		return;
+
 	while (!rx_throttled(brdg) && (skb = skb_dequeue(&dev->rx_done))) {
-		if (!brdg) {
-			print_hex_dump(KERN_INFO, "dun data:", 0, 1, 1, skb->data, skb->len, false);
-			dev_kfree_skb_any(skb);
-			continue;
-		}
-
-
 		dev->to_host++;
 		info = (struct timestamp_info *)skb->cb;
 		info->rx_done_sent = get_timestamp();
@@ -332,6 +325,7 @@ int data_bridge_open(struct bridge *brdg)
 	dev->rx_throttled_cnt = 0;
 	dev->rx_unthrottled_cnt = 0;
 
+	queue_work(dev->wq, &dev->process_rx_w);
 
 	return 0;
 }
@@ -379,7 +373,7 @@ static void defer_kevent(struct work_struct *work)
 
 		status = usb_autopm_get_interface(dev->intf);
 		if (status < 0) {
-			dev_err(&dev->intf->dev,
+			dev_dbg(&dev->intf->dev,
 				"can't acquire interface, status %d\n", status);
 			return;
 		}
@@ -398,7 +392,7 @@ static void defer_kevent(struct work_struct *work)
 
 		status = usb_autopm_get_interface(dev->intf);
 		if (status < 0) {
-			dev_err(&dev->intf->dev,
+			dev_dbg(&dev->intf->dev,
 				"can't acquire interface, status %d\n", status);
 			return;
 		}
@@ -487,7 +481,7 @@ int data_bridge_write(unsigned int id, struct sk_buff *skb)
 
 	result = usb_autopm_get_interface(dev->intf);
 	if (result < 0) {
-		dev_err(&dev->intf->dev, "%s: resume failure\n", __func__);
+		dev_dbg(&dev->intf->dev, "%s: resume failure\n", __func__);
 		goto pm_error;
 	}
 
@@ -576,7 +570,8 @@ static int data_bridge_resume(struct data_bridge *dev)
 		dev->txurb_drp_cnt--;
 	}
 
-	queue_work(dev->wq, &dev->process_rx_w);
+	if (dev->brdg)
+		queue_work(dev->wq, &dev->process_rx_w);
 
 	return 0;
 }
@@ -672,7 +667,7 @@ static int data_bridge_probe(struct usb_interface *iface,
 		bulk_out->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK); 
 #endif /* secheol.pyo - endpoint logging */
 	usb_set_intfdata(iface, dev);
-	
+
 	INIT_WORK(&dev->kevent, defer_kevent);
 	INIT_WORK(&dev->process_rx_w, data_bridge_process_rx);
 
@@ -680,7 +675,6 @@ static int data_bridge_probe(struct usb_interface *iface,
 
 	/*allocate list of rx urbs*/
 	data_bridge_prepare_rx(dev);
-	queue_work(dev->wq, &dev->process_rx_w);
 
 	platform_device_add(dev->pdev);
 
@@ -1006,12 +1000,10 @@ static void bridge_disconnect(struct usb_interface *intf)
 	}
 
 	ch_id--;
-#if 0 //LGE_CHANGE_S Workaround for power off kernel crash
-	ctrl_bridge_disconnect(ch_id);
-#endif//LGE_CHANGE_E Workaround for power off kernel crash
+	ctrl_bridge_disconnect(dev->id);
 	platform_device_unregister(dev->pdev);
 	usb_set_intfdata(intf, NULL);
-	__dev[ch_id] = NULL;
+	__dev[dev->id] = NULL;
 
 	cancel_work_sync(&dev->process_rx_w);
 	cancel_work_sync(&dev->kevent);
@@ -1048,8 +1040,11 @@ static void bridge_disconnect(struct usb_interface *intf)
 /*bit position represents interface number*/
 #define PID9001_IFACE_MASK	0xC
 #define PID9034_IFACE_MASK	0xC
+#ifdef CONFIG_USB_LGE_DDM_BRIDGE
+#define PID9048_IFACE_MASK	0x30
+#else
 #define PID9048_IFACE_MASK	0x18
-/* Added for CSVT */
+#endif
 #define PID904C_IFACE_MASK	0x28
 
 static const struct usb_device_id bridge_ids[] = {

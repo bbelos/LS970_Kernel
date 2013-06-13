@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/serial.h>
@@ -400,17 +401,6 @@ static void csvt_ctrl_release(struct usb_serial *serial)
 	usb_set_serial_port_data(port, NULL);
 }
 
-static void csvt_ctrl_init_termios(struct tty_struct *tty)
-{
-	struct ktermios *termios = tty->termios;
-	*termios = tty_std_termios;
-
-	termios->c_iflag = 0;
-	termios->c_oflag = 0;
-	termios->c_cflag = B38400 | CS8 | CREAD;
-	termios->c_lflag = 0;
-}
-
 static struct usb_serial_driver csvt_device = {
 	.driver			= {
 		.owner	= THIS_MODULE,
@@ -418,7 +408,6 @@ static struct usb_serial_driver csvt_device = {
 	},
 	.description		= "qc_csvt",
 	.id_table		= id_table,
-	.usb_driver		= &csvt_driver,
 	.num_ports		= 1,
 	.open			= csvt_ctrl_open,
 	.close			= csvt_ctrl_close,
@@ -428,26 +417,23 @@ static struct usb_serial_driver csvt_device = {
 	.tiocmset		= csvt_ctrl_tiocmset,
 	.ioctl			= csvt_ctrl_ioctl,
 	.set_termios		= csvt_ctrl_set_termios,
-	.init_termios     = csvt_ctrl_init_termios,
 	.read_int_callback	= csvt_ctrl_int_cb,
 	.attach			= csvt_ctrl_attach,
 	.release		= csvt_ctrl_release,
+};
+
+static struct usb_serial_driver * const serial_drivers[] = {
+	&csvt_device,
+	NULL,
 };
 
 static int __init csvt_init(void)
 {
 	int	retval;
 
-	retval = usb_serial_register(&csvt_device);
+	retval = usb_serial_register_drivers(&csvt_driver, serial_drivers);
 	if (retval) {
 		err("%s: usb serial register failed\n", __func__);
-		return retval;
-	}
-
-	retval = usb_register(&csvt_driver);
-	if (retval) {
-		usb_serial_deregister(&csvt_device);
-		err("%s: usb register failed\n", __func__);
 		return retval;
 	}
 
@@ -456,8 +442,7 @@ static int __init csvt_init(void)
 
 static void __exit csvt_exit(void)
 {
-	usb_deregister(&csvt_driver);
-	usb_serial_deregister(&csvt_device);
+	usb_serial_deregister_drivers(&csvt_driver, serial_drivers);
 }
 
 module_init(csvt_init);

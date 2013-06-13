@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  */
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <mach/msm_memtypes.h>
 #include "vcd_ddl.h"
 #include "vcd_ddl_shared_mem.h"
@@ -182,16 +182,6 @@ u32 ddl_decoder_dpb_transact(struct ddl_decoder_data *decoder,
 						in_out_frame->vcd_frm.virtual,
 						decoder->meta_data_offset,
 						decoder->suffix);
-					/* 2012.09.13, hoeyon.jang@lge.com {++ */
-					/* wrong meta_data_offset(>= alloc_len) cause kenel crash */
-					if(unlikely((u32)in_out_frame->vcd_frm.alloc_len <= 
-								((u32)decoder->meta_data_offset+decoder->suffix)))
-					{
-						//vcd_status = VCD_ERR_BAD_POINTER;
-						DDL_MSG_ERROR("META OFFSET IS WRONG");
-						break;
-					} 
-					/* 2012.09.13, hoyeon.jang@lge.com }++*/
 					msm_ion_do_cache_op(
 						ddl_context->video_ion_client,
 						in_out_frame->vcd_frm.\
@@ -481,7 +471,7 @@ struct ddl_client_context *ddl_get_current_ddl_client_for_channel_id(
 		ddl = ddl_context->current_ddl[1];
 	else {
 		DDL_MSG_LOW("STATE-CRITICAL-FRMRUN");
-		DDL_MSG_ERROR("Unexpected channel ID = %d", channel_id);
+		DDL_MSG_LOW("Unexpected channel ID = %d", channel_id);
 		ddl = NULL;
 	}
 	return ddl;
@@ -543,6 +533,7 @@ void ddl_free_dec_hw_buffers(struct ddl_client_context *ddl)
 	ddl_pmem_free(&dec_bufs->stx_parser);
 	ddl_pmem_free(&dec_bufs->desc);
 	ddl_pmem_free(&dec_bufs->context);
+	ddl_pmem_free(&dec_bufs->extnuserdata);
 	memset(dec_bufs, 0, sizeof(struct ddl_dec_buffers));
 }
 
@@ -611,6 +602,7 @@ void ddl_calc_dec_hw_buffers_size(enum vcd_codec codec, u32 width,
 	u32 sz_sub_anchor_mv = 0, sz_overlap_xform = 0, sz_bit_plane3 = 0;
 	u32 sz_bit_plane2 = 0, sz_bit_plane1 = 0, sz_stx_parser = 0;
 	u32 sz_desc, sz_cpb, sz_context, sz_vert_nb_mv = 0, sz_nb_ip = 0;
+	u32 sz_extnuserdata = 0;
 
 	if (codec == VCD_CODEC_H264) {
 		sz_mv = ddl_get_yuv_buf_size(width,
@@ -640,7 +632,8 @@ void ddl_calc_dec_hw_buffers_size(enum vcd_codec codec, u32 width,
 			sz_bit_plane3 = DDL_KILO_BYTE(2);
 			sz_bit_plane2 = DDL_KILO_BYTE(2);
 			sz_bit_plane1 = DDL_KILO_BYTE(2);
-		}
+		} else if (codec == VCD_CODEC_MPEG2)
+			sz_extnuserdata = DDL_KILO_BYTE(2);
 	}
 	sz_desc = DDL_KILO_BYTE(128);
 	sz_cpb = VCD_DEC_CPB_SIZE;
@@ -667,6 +660,7 @@ void ddl_calc_dec_hw_buffers_size(enum vcd_codec codec, u32 width,
 		buf_size->sz_desc           = sz_desc;
 		buf_size->sz_cpb            = sz_cpb;
 		buf_size->sz_context        = sz_context;
+		buf_size->sz_extnuserdata   = sz_extnuserdata;
 	}
 }
 
@@ -783,6 +777,16 @@ u32 ddl_allocate_dec_hw_buffers(struct ddl_client_context *ddl)
 					ION_IOC_CLEAN_INV_CACHES);
 			}
 		}
+	}
+	if (buf_size.sz_extnuserdata > 0) {
+		dec_bufs->extnuserdata.mem_type = DDL_FW_MEM;
+		ptr = ddl_pmem_alloc(&dec_bufs->extnuserdata,
+				buf_size.sz_extnuserdata, DDL_KILO_BYTE(2));
+		if (!ptr)
+			goto fail_free_exit;
+		else
+			memset(dec_bufs->extnuserdata.align_virtual_addr,
+				0, buf_size.sz_extnuserdata);
 	}
 	return status;
 fail_free_exit:
@@ -932,7 +936,9 @@ u32 ddl_allocate_enc_hw_buffers(struct ddl_client_context *ddl)
 				goto fail_enc_free_exit;
 		}
 		if (buf_size.sz_pred > 0) {
-			enc_bufs->pred.mem_type = DDL_FW_MEM;
+			enc_bufs->pred.mem_type =
+				res_trk_check_for_sec_session() ?
+				DDL_MM_MEM : DDL_FW_MEM;
 			ptr = ddl_pmem_alloc(&enc_bufs->pred,
 				buf_size.sz_pred, DDL_KILO_BYTE(2));
 			if (!ptr)

@@ -345,7 +345,12 @@ static int hsic_tty_write(struct tty_struct *tty, const unsigned char *buf, int 
     }
 
     skb = alloc_skb(len, GFP_ATOMIC);
-    skb->data = (unsigned char *)buf;
+	if(!skb)
+	{
+		pr_debug("%s: len alloc failed\n", __func__);
+		return -ENOMEM;
+	}
+	skb->data = (unsigned char *)buf;
     skb->len = len;
 
     spin_lock(&port->rx_lock);
@@ -531,6 +536,7 @@ static int __init hsic_tty_init(void)
     hsic_tty.client_port_num = port_num;
 #ifdef CONFIG_MODEM_SUPPORT
     spin_lock_init(&hsic_tty.lock);
+    spin_lock_init(&hsic_tty.reset_lock);
     hsic_tty.connect = hsic_tty_connect;
     hsic_tty.get_dtr = hsic_tty_get_dtr;
     hsic_tty.get_rts = hsic_tty_get_rts;

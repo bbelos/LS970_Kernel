@@ -27,13 +27,15 @@
 #include <asm/dma.h>
 #include <linux/dma-mapping.h>
 #include <linux/android_pmem.h>
-#include <sound/snd_compress_params.h>
+#include <linux/of_device.h>
+#include <sound/compress_params.h>
 #include <sound/compress_offload.h>
 #include <sound/compress_driver.h>
 #include <sound/timer.h>
 
 #include "msm-pcm-q6-v2.h"
 #include "msm-pcm-routing-v2.h"
+#include "audio_ocmem.h"
 
 static struct audio_locks the_locks;
 
@@ -55,11 +57,11 @@ static struct snd_pcm_hardware msm_pcm_hardware = {
 	.rate_max =             48000,
 	.channels_min =         1,
 	.channels_max =         2,
-	.buffer_bytes_max =     2 * 1024 * 1024,
+	.buffer_bytes_max =     1024 * 1024,
 	.period_bytes_min =	128 * 1024,
-	.period_bytes_max =     512 * 1024,
+	.period_bytes_max =     256 * 1024,
 	.periods_min =          4,
-	.periods_max =          16,
+	.periods_max =          8,
 	.fifo_size =            0,
 };
 
@@ -85,7 +87,6 @@ static void event_handler(uint32_t opcode,
 	unsigned long flag = 0;
 	int i = 0;
 
-	pr_debug("%s\n", __func__);
 	spin_lock_irqsave(&the_locks.event_lock, flag);
 	switch (opcode) {
 	case ASM_DATA_EVENT_WRITE_DONE_V2: {
@@ -108,12 +109,16 @@ static void event_handler(uint32_t opcode,
 			break;
 		} else
 			atomic_set(&prtd->pending_buffer, 0);
-		if (runtime->status->hw_ptr >= runtime->control->appl_ptr)
-			break;
+
+		buf = prtd->audio_client->port[IN].buf;
+		if (runtime->status->hw_ptr >= runtime->control->appl_ptr) {
+			memset((void *)buf[0].data +
+				(prtd->out_head * prtd->pcm_count),
+				0, prtd->pcm_count);
+		}
 		pr_debug("%s:writing %d bytes of buffer to dsp 2\n",
 				__func__, prtd->pcm_count);
 
-		buf = prtd->audio_client->port[IN].buf;
 		param.paddr = (unsigned long)buf[0].phys
 				+ (prtd->out_head * prtd->pcm_count);
 		param.len = prtd->pcm_count;
@@ -148,8 +153,7 @@ static void event_handler(uint32_t opcode,
 			if (runtime->status->hw_ptr >=
 				runtime->control->appl_ptr)
 				break;
-			pr_debug("%s:writing %d bytes"
-				" of buffer to dsp\n",
+			pr_debug("%s:writing %d bytes of buffer to dsp\n",
 				__func__, prtd->pcm_count);
 			buf = prtd->audio_client->port[IN].buf;
 			param.paddr = (unsigned long)buf[prtd->out_head].phys;
@@ -223,15 +227,19 @@ static int msm_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		prtd->pcm_irq_pos = 0;
+		audio_ocmem_process_req(AUDIO, true);
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		pr_debug("SNDRV_PCM_TRIGGER_START\n");
 		q6asm_run_nowait(prtd->audio_client, 0, 0, 0);
 		atomic_set(&prtd->start, 1);
+		atomic_set(&prtd->stop, 0);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 		pr_debug("SNDRV_PCM_TRIGGER_STOP\n");
+		audio_ocmem_process_req(AUDIO, false);
 		atomic_set(&prtd->start, 0);
+		atomic_set(&prtd->stop, 1);
 		if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
 			break;
 		break;
@@ -319,6 +327,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 
 	prtd->dsp_cnt = 0;
 	atomic_set(&prtd->pending_buffer, 1);
+	atomic_set(&prtd->stop, 1);
 	runtime->private_data = prtd;
 	lpa_audio.prtd = prtd;
 	lpa_set_volume(lpa_audio.volume);
@@ -340,8 +349,8 @@ int lpa_set_volume(unsigned volume)
 	if (lpa_audio.prtd && lpa_audio.prtd->audio_client) {
 		rc = q6asm_set_volume(lpa_audio.prtd->audio_client, volume);
 		if (rc < 0) {
-			pr_err("%s: Send Volume command failed"
-					" rc=%d\n", __func__, rc);
+			pr_err("%s: Send Volume command failed rc=%d\n",
+					__func__, rc);
 		}
 	}
 	lpa_audio.volume = volume;
@@ -362,7 +371,8 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 	To issue EOS to dsp, we need to be run state otherwise
 	EOS is not honored.
 	*/
-	if (msm_routing_check_backend_enabled(soc_prtd->dai_link->be_id)) {
+	if (msm_routing_check_backend_enabled(soc_prtd->dai_link->be_id) &&
+		(!atomic_read(&prtd->stop))) {
 		rc = q6asm_run(prtd->audio_client, 0, 0, 0);
 		atomic_set(&prtd->pending_buffer, 0);
 		prtd->cmd_ack = 0;
@@ -382,6 +392,7 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 	q6asm_audio_client_buf_free_contiguous(dir,
 				prtd->audio_client);
 
+	atomic_set(&prtd->stop, 1);
 	pr_debug("%s\n", __func__);
 	msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
 		SNDRV_PCM_STREAM_PLAYBACK);
@@ -461,8 +472,8 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 			runtime->hw.period_bytes_min,
 			runtime->hw.periods_max);
 	if (ret < 0) {
-		pr_err("Audio Start: Buffer Allocation failed "
-					"rc = %d\n", ret);
+		pr_err("Audio Start: Buffer Allocation failed rc = %d\n",
+						ret);
 		return -ENOMEM;
 	}
 	buf = prtd->audio_client->port[dir].buf;
@@ -509,12 +520,9 @@ static int msm_pcm_ioctl(struct snd_pcm_substream *substream,
 		temp = temp * (runtime->rate/1000);
 		temp = div_u64(temp, 1000);
 		tstamp.sampling_rate = runtime->rate;
-		tstamp.rendered = (size_t)(temp & 0xFFFFFFFF);
-		tstamp.decoded  = (size_t)((temp >> 32) & 0xFFFFFFFF);
 		tstamp.timestamp = timestamp;
-		pr_debug("%s: bytes_consumed:lsb = %d, msb = %d,"
-			"timestamp = %lld,\n",
-			__func__, tstamp.rendered, tstamp.decoded,
+		pr_debug("%s: bytes_consumed:timestamp = %lld,\n",
+					__func__,
 			tstamp.timestamp);
 		if (copy_to_user((void *) arg, &tstamp,
 			sizeof(struct snd_compr_tstamp)))
@@ -566,6 +574,9 @@ static struct snd_soc_platform_driver msm_soc_platform = {
 
 static __devinit int msm_pcm_probe(struct platform_device *pdev)
 {
+	if (pdev->dev.of_node)
+		dev_set_name(&pdev->dev, "%s", "msm-pcm-lpa");
+
 	dev_info(&pdev->dev, "%s: dev name %s\n",
 			__func__, dev_name(&pdev->dev));
 	return snd_soc_register_platform(&pdev->dev,
@@ -578,10 +589,17 @@ static int msm_pcm_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id msm_pcm_lpa_dt_match[] = {
+	{.compatible = "qcom,msm-pcm-lpa"},
+	{}
+};
+MODULE_DEVICE_TABLE(of, msm_pcm_lpa_dt_match);
+
 static struct platform_driver msm_pcm_driver = {
 	.driver = {
 		.name = "msm-pcm-lpa",
 		.owner = THIS_MODULE,
+		.of_match_table = msm_pcm_lpa_dt_match,
 	},
 	.probe = msm_pcm_probe,
 	.remove = __devexit_p(msm_pcm_remove),

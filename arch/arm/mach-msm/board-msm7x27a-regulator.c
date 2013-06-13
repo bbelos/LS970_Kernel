@@ -11,6 +11,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/kernel.h>
 #include "board-msm7x27a-regulator.h"
 
 #define VOLTAGE_RANGE(min_uV, max_uV, step_uV)	((max_uV - min_uV) / step_uV)

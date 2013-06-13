@@ -179,7 +179,7 @@ static ssize_t felica_cen_read(struct file *fp, char *buf, size_t count, loff_t 
 #endif
 
 #ifdef FELICA_FN_DEVICE_TEST
-	FELICA_DEBUG_MSG("[FELICA_CEN] felica_cen_read - result_read_cen(%d) \n",result_read_cen);
+	FELICA_DEBUG_MSG("[FELICA_CEN] felica_cen_read - result_read_cen = %d,(%d) \n",felica_cen,result_read_cen);
 	return result_read_cen;
 #else
   return 1;
@@ -260,10 +260,11 @@ static ssize_t felica_cen_write(struct file *fp, const char *buf, size_t count, 
   mutex_unlock(&felica_cen_mutex);
   mdelay(2);
 
-#ifdef FELICA_LED_SUPPORT
+//20121112 do not need below code
+#if 0
 	if(*buf == 1)
 	{
-		rc= request_irq(gpio_to_irq(GPIO_FELICA_RFS), felica_rfs_detect_interrupt, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND , FELICA_RFS_NAME, NULL);
+		rc= request_irq(gpio_to_irq(felica_get_rfs_gpio_num()), felica_rfs_detect_interrupt, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND , FELICA_RFS_NAME, NULL);
 		if (rc)
 		{
 			FELICA_DEBUG_MSG("[FELICA_RFS] FAIL!! can not request_irq %d\n", rc);
@@ -272,14 +273,14 @@ static ssize_t felica_cen_write(struct file *fp, const char *buf, size_t count, 
 	}
 	else
 	{
-		free_irq(gpio_to_irq(GPIO_FELICA_RFS), NULL);
+		free_irq(gpio_to_irq(felica_get_rfs_gpio_num()), NULL);
 	}
 #endif
 
 #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_CEN] felica_cen_write - end \n");
 #endif
-
+	FELICA_DEBUG_MSG("[FELICA_CEN] felica_cen_write - result_write_cen = %d\n",*buf);
   return 1;
 }
 

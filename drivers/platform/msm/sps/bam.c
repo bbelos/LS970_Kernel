@@ -643,11 +643,13 @@ static inline void bam_write_reg_field(void *base, u32 offset,
  */
 int bam_init(void *base, u32 ee,
 		u16 summing_threshold,
-		u32 irq_mask, u32 *version, u32 *num_pipes)
+		u32 irq_mask, u32 *version,
+		u32 *num_pipes, u32 p_rst)
 {
-	/* disable bit#11 because of HW bug */
-	u32 cfg_bits = 0xffffffff & ~(1 << 11);
+	u32 cfg_bits;
 	u32 ver = 0;
+
+	SPS_DBG2("sps:%s:bam=0x%x(va).ee=%d.", __func__, (u32) base, ee);
 
 	ver = bam_read_reg_field(base, REVISION, BAM_REVISION);
 
@@ -656,7 +658,7 @@ int bam_init(void *base, u32 ee,
 				(u32) base, ver);
 		return -ENODEV;
 	} else
-		SPS_INFO("sps:REVISION of BAM 0x%x is 0x%x.\n",
+		SPS_DBG2("sps:REVISION of BAM 0x%x is 0x%x.\n",
 				(u32) base, ver);
 
 	if (summing_threshold == 0) {
@@ -664,6 +666,11 @@ int bam_init(void *base, u32 ee,
 		SPS_ERR("sps:bam 0x%x(va) summing_threshold is zero , "
 				"use default 4.\n", (u32) base);
 	}
+
+	if (p_rst)
+		cfg_bits = 0xffffffff & ~(3 << 11);
+	else
+		cfg_bits = 0xffffffff & ~(1 << 11);
 
 	bam_write_reg_field(base, CTRL, BAM_SW_RST, 1);
 	/* No delay needed */
@@ -743,6 +750,8 @@ int bam_security_init(void *base, u32 ee, u32 vmid, u32 pipe_mask)
 	u32 mask;
 	u32 pipe;
 
+	SPS_DBG2("sps:%s:bam=0x%x(va).", __func__, (u32) base);
+
 	/*
 	 * Discover the hardware version number and the number of pipes
 	 * supported by this BAM
@@ -782,6 +791,8 @@ int bam_check(void *base, u32 *version, u32 *num_pipes)
 {
 	u32 ver = 0;
 
+	SPS_DBG2("sps:%s:bam=0x%x(va).", __func__, (u32) base);
+
 	if (!bam_read_reg_field(base, CTRL, BAM_EN)) {
 		SPS_ERR("sps:%s:bam 0x%x(va) is not enabled.\n",
 				__func__, (u32) base);
@@ -813,6 +824,8 @@ int bam_check(void *base, u32 *version, u32 *num_pipes)
  */
 void bam_exit(void *base, u32 ee)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).ee=%d.", __func__, (u32) base, ee);
+
 	bam_write_reg_field(base, IRQ_SRCS_MSK_EE(ee), BAM_IRQ, 0);
 
 	bam_write_reg(base, IRQ_EN, 0);
@@ -899,6 +912,8 @@ u32 bam_check_irq_source(void *base, u32 ee, u32 mask,
 int bam_pipe_init(void *base, u32 pipe,	struct bam_pipe_parameters *param,
 					u32 ee)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).pipe=%d.", __func__, (u32) base, pipe);
+
 	/* Reset the BAM pipe */
 	bam_write_reg(base, P_RST(pipe), 1);
 	/* No delay needed */
@@ -967,6 +982,8 @@ int bam_pipe_init(void *base, u32 pipe,	struct bam_pipe_parameters *param,
  */
 void bam_pipe_exit(void *base, u32 pipe, u32 ee)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).pipe=%d.", __func__, (u32) base, pipe);
+
 	bam_write_reg(base, P_IRQ_EN(pipe), 0);
 
 	/* Disable the Pipe Interrupt at the BAM level */
@@ -982,6 +999,8 @@ void bam_pipe_exit(void *base, u32 pipe, u32 ee)
  */
 void bam_pipe_enable(void *base, u32 pipe)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).pipe=%d.", __func__, (u32) base, pipe);
+
 	bam_write_reg_field(base, P_CTRL(pipe), P_EN, 1);
 }
 
@@ -991,6 +1010,8 @@ void bam_pipe_enable(void *base, u32 pipe)
  */
 void bam_pipe_disable(void *base, u32 pipe)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).pipe=%d.", __func__, (u32) base, pipe);
+
 	bam_write_reg_field(base, P_CTRL(pipe), P_EN, 0);
 }
 
@@ -1010,6 +1031,8 @@ int bam_pipe_is_enabled(void *base, u32 pipe)
 void bam_pipe_set_irq(void *base, u32 pipe, enum bam_enable irq_en,
 		      u32 src_mask, u32 ee)
 {
+	SPS_DBG2("sps:%s:bam=0x%x(va).pipe=%d.", __func__, (u32) base, pipe);
+
 	bam_write_reg(base, P_IRQ_EN(pipe), src_mask);
 	bam_write_reg_field(base, IRQ_SRCS_MSK_EE(ee), (1 << pipe), irq_en);
 }
@@ -1134,7 +1157,6 @@ u32 bam_pipe_timer_get_count(void *base, u32 pipe)
 	return bam_read_reg(base, P_TIMER(pipe));
 }
 
-#ifdef CONFIG_DEBUG_FS
 /* output the content of BAM-level registers */
 void print_bam_reg(void *virt_addr)
 {
@@ -1287,7 +1309,7 @@ void print_bam_pipe_selected_reg(void *virt_addr, u32 pipe_index)
 		"BAM_P_IRQ_STTS: 0x%x\n"
 		"BAM_P_IRQ_STTS_P_TRNSFR_END_IRQ: 0x%x\n"
 		"BAM_P_IRQ_STTS_P_PRCSD_DESC_IRQ: 0x%x\n"
-		"BAM_P_IRQ_EN: %d\n"
+		"BAM_P_IRQ_EN: 0x%x\n"
 		"BAM_P_PRDCR_SDBNDn_BAM_P_BYTES_FREE: 0x%x (%d)\n"
 		"BAM_P_CNSMR_SDBNDn_BAM_P_BYTES_AVAIL: 0x%x (%d)\n"
 		"BAM_P_SW_DESC_OFST: 0x%x\n"
@@ -1335,4 +1357,78 @@ void print_bam_pipe_selected_reg(void *virt_addr, u32 pipe_index)
 		bam_read_reg_field(base, P_EVNT_GEN_TRSHLD(pipe),
 					P_EVNT_GEN_TRSHLD_P_TRSHLD));
 }
-#endif
+
+/* output descriptor FIFO of a pipe */
+void print_bam_pipe_desc_fifo(void *virt_addr, u32 pipe_index)
+{
+	void *base = virt_addr;
+	u32 pipe = pipe_index;
+	u32 desc_fifo_addr;
+	u32 desc_fifo_size;
+	u32 *desc_fifo;
+	int i;
+
+	if (base == NULL)
+		return;
+
+	desc_fifo_addr = bam_read_reg(base, P_DESC_FIFO_ADDR(pipe));
+	desc_fifo_size = bam_read_reg_field(base, P_FIFO_SIZES(pipe),
+						P_DESC_FIFO_SIZE);
+
+	if (desc_fifo_addr == 0) {
+		SPS_ERR("sps:%s:desc FIFO address of Pipe %d is NULL.\n",
+			__func__, pipe);
+		return;
+	} else if (desc_fifo_size == 0) {
+		SPS_ERR("sps:%s:desc FIFO size of Pipe %d is 0.\n",
+			__func__, pipe);
+		return;
+	}
+
+	SPS_INFO("\nsps:----- descriptor FIFO of Pipe %d -----\n", pipe);
+
+	SPS_INFO("BAM_P_DESC_FIFO_ADDR: 0x%x\n"
+		"BAM_P_DESC_FIFO_SIZE: 0x%x (%d)\n\n",
+		desc_fifo_addr, desc_fifo_size, desc_fifo_size);
+
+	desc_fifo = (u32 *) phys_to_virt(desc_fifo_addr);
+
+	SPS_INFO("-------------------- begin of FIFO --------------------\n");
+
+	for (i = 0; i < desc_fifo_size; i += 0x10)
+		SPS_INFO("addr 0x%x: 0x%x, 0x%x, 0x%x, 0x%x.\n",
+			desc_fifo_addr + i,
+			desc_fifo[i / 4], desc_fifo[(i / 4) + 1],
+			desc_fifo[(i / 4) + 2], desc_fifo[(i / 4) + 3]);
+
+	SPS_INFO("--------------------  end of FIFO  --------------------\n");
+}
+
+/* output BAM_TEST_BUS_REG with specified TEST_BUS_SEL */
+void print_bam_test_bus_reg(void *base, u32 tb_sel)
+{
+	u32 i;
+	u32 test_bus_selection[] = {0x1, 0x2, 0x3, 0x4, 0xD, 0x10,
+			0x41, 0x42, 0x43, 0x44, 0x45, 0x46};
+	u32 size = sizeof(test_bus_selection) / sizeof(u32);
+
+	if ((base == NULL) || (tb_sel == 0))
+		return;
+
+	SPS_INFO("\nsps:Specified TEST_BUS_SEL value: 0x%x\n", tb_sel);
+	bam_write_reg_field(base, TEST_BUS_SEL, BAM_TESTBUS_SEL, tb_sel);
+	SPS_INFO("sps:BAM_TEST_BUS_REG: 0x%x when TEST_BUS_SEL: 0x%x\n\n",
+		bam_read_reg(base, TEST_BUS_REG),
+		bam_read_reg_field(base, TEST_BUS_SEL, BAM_TESTBUS_SEL));
+
+	/* output other selections */
+	for (i = 0; i < size; i++) {
+		bam_write_reg_field(base, TEST_BUS_SEL, BAM_TESTBUS_SEL,
+					test_bus_selection[i]);
+
+		SPS_INFO("sps:bam 0x%x(va);TEST_BUS_REG:0x%x;TEST_BUS_SEL:0x%x",
+			(u32) base, bam_read_reg(base, TEST_BUS_REG),
+			bam_read_reg_field(base, TEST_BUS_SEL,
+					BAM_TESTBUS_SEL));
+	}
+}

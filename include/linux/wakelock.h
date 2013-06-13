@@ -18,10 +18,8 @@
 
 #include <linux/list.h>
 #include <linux/ktime.h>
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #include <linux/module.h>
 #include <linux/kallsyms.h>
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-03-06, SuspendEarlySuspend debugfs
 
 /* A wake_lock prevents the system from entering suspend or other low power
  * states when active. If the type is set to WAKE_LOCK_SUSPEND, the wake_lock
@@ -32,11 +30,11 @@
 
 enum {
 	WAKE_LOCK_SUSPEND, /* Prevent suspend */
-	WAKE_LOCK_IDLE,    /* Prevent low power idle */
 	WAKE_LOCK_TYPE_COUNT
 };
 
 struct wake_lock {
+#ifdef CONFIG_HAS_WAKELOCK
 	struct list_head    link;
 	int                 flags;
 	const char         *name;
@@ -51,6 +49,7 @@ struct wake_lock {
 		ktime_t         max_time;
 		ktime_t         last_time;
 	} stat;
+#endif
 #endif
 };
 
@@ -74,11 +73,10 @@ int wake_lock_active(struct wake_lock *lock);
  * number of jiffies until all active wake locks time out.
  */
 long has_wake_lock(int type);
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 #ifdef CONFIG_LGE_SUSPEND_AUTOTEST
 int wake_lock_active_name(char *name);
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #else
 
 static inline void wake_lock_init(struct wake_lock *lock, int type,
@@ -93,7 +91,7 @@ static inline long has_wake_lock(int type) { return 0; }
 
 #endif
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#ifdef CONFIG_LGE_SUSPEND_AUTOTEST
 enum lateresume_wq_stat_step {
 	LATERESUME_START = 1,
 	LATERESUME_MUTEXLOCK,
@@ -174,6 +172,6 @@ static inline void save_earlysuspend_call(char *name)
 			call_name,
 			sizeof(suspend_wq_stats.last_earlysuspend_call));
 }
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#endif
 #endif
 

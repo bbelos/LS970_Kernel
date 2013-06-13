@@ -70,7 +70,7 @@
 #define C_330K_TA_MA        500
 #define C_620K_TA_MA        500
 #define C_910K_TA_MA        1500//[ORG]500
-#define C_NONE_TA_MA        900 // DCM/KDDI Adaptive current 900mA or 1500mA
+#define C_NONE_TA_MA        500 // DCM/KDDI Adaptive current 500mA to 1500mA
 
 #define C_NO_INIT_USB_MA    0
 #define C_MHL_1K_USB_MA     500

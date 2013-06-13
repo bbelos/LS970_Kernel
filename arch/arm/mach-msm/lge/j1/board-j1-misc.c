@@ -1,5 +1,5 @@
 /*
-  * Copyright (C) 2011 LGE, Inc.
+  * Copyright (C) 2011,2012 LGE, Inc.
   *
   * Author: Sungwoo Cho <sungwoo.cho@lge.com>
   *
@@ -28,7 +28,6 @@
 #include "devices.h"
 #include <linux/android_vibrator.h>
 
-#include <linux/regulator/gpio-regulator.h>
 #include <linux/i2c.h>
 
 #ifdef CONFIG_LGE_ISA1200
@@ -380,38 +379,38 @@ static struct platform_device *misc_devices[] __initdata = {
 };
 #endif
 
-#if defined(CONFIG_SII8334_MHL_TX)
+#ifdef CONFIG_SII8334_MHL_TX
 
-#define MHL_RESET_N 							31
-#define MHL_INT_N								43
+#define GPIO_MHL_RESET_N 	31
+#define GPIO_MHL_INT_N		43
 
-static int mhl_gpio_init(void)
+static int sii8334_mhl_gpio_init(void)
 {
 	int rc;
-	
-	rc = gpio_request(MHL_INT_N, "mhl_int_n");
+
+	rc = gpio_request(GPIO_MHL_INT_N, "sii8334_mhl_int_n");
 	if (rc < 0) {
-		pr_err("failed to request mhl_int_n gpio\n");
+		pr_err("failed to request sii8334_mhl_int_n gpio\n");
 		goto error1;
 	}
-	gpio_export(MHL_INT_N, 1);
+	gpio_export(GPIO_MHL_INT_N, 1);
 
-	rc = gpio_request(MHL_RESET_N, "mhl_reset_n");
+	rc = gpio_request(GPIO_MHL_RESET_N, "sii8334_mhl_reset_n");
 	if (rc < 0) {
-		pr_err("failed to request mhl_reset_n gpio\n");
+		pr_err("failed to request sii8334_mhl_reset_n gpio\n");
 		goto error2;
 	}
-	
-	rc = gpio_direction_output(MHL_RESET_N, 0);
+
+	rc = gpio_direction_output(GPIO_MHL_RESET_N, 0);
 	if (rc < 0) {
-		pr_err("failed to request mhl_reset_n gpio\n");
+		pr_err("failed to set direction for sii8334_mhl_reset_n gpio\n");
 		goto error3;
 	}
 
 error3:
-	gpio_free(MHL_RESET_N);
+	gpio_free(GPIO_MHL_RESET_N);
 error2:
-	gpio_free(MHL_INT_N);
+	gpio_free(GPIO_MHL_INT_N);
 error1:
 
 	return rc;
@@ -419,7 +418,7 @@ error1:
 
 static struct regulator *vreg_l18_mhl;
 
-static int mhl_power_onoff(bool on, bool pm_ctrl)
+static int sii8334_mhl_power_onoff(bool on, bool pm_ctrl)
 {
 	static bool power_state=0;
 	int rc = 0;
@@ -441,8 +440,7 @@ static int mhl_power_onoff(bool on, bool pm_ctrl)
 	}
 
 	if (on) {
-		
-		gpio_set_value(MHL_RESET_N, 0);
+		gpio_set_value(GPIO_MHL_RESET_N, 0);
 	
 		rc = regulator_set_optimum_mode(vreg_l18_mhl, 100000);    
 		if (rc < 0) {
@@ -468,7 +466,7 @@ static int mhl_power_onoff(bool on, bool pm_ctrl)
 		}
 
 		msleep(100);
-		gpio_set_value(MHL_RESET_N, 1);
+		gpio_set_value(GPIO_MHL_RESET_N, 1);
 
 	}
 	else {
@@ -486,15 +484,15 @@ static int mhl_power_onoff(bool on, bool pm_ctrl)
 							__func__, rc);
 			return rc;
 		}
-		
-		gpio_set_value(MHL_RESET_N, 0);
+
+		gpio_set_value(GPIO_MHL_RESET_N, 0);
 	}
 
 	return rc;
 }
 
-static struct mhl_platform_data mhl_pdata = {
-	.power = mhl_power_onoff,
+static struct mhl_platform_data sii8334_mhl_pdata = {
+	.power = sii8334_mhl_power_onoff,
 };
 
 
@@ -508,6 +506,8 @@ static struct mhl_platform_data mhl_pdata = {
 #define I2C_J1V (1 << 5)
 /* LGE_UPDATE_E */
 
+#define MHL_I2C_DEVICE_TYPE "SiI-833x"
+
 struct i2c_registry {
 	u8                     machs;
 	int                    bus;
@@ -517,21 +517,21 @@ struct i2c_registry {
 
 struct i2c_board_info i2c_mhl_info[] = {
 	{
-		I2C_BOARD_INFO("Sil-833x", 0x72 >> 1),  /* 0x39 */
-		.irq = MSM_GPIO_TO_INT(MHL_INT_N),
-		.platform_data = &mhl_pdata,
+		I2C_BOARD_INFO(MHL_I2C_DEVICE_TYPE, 0x72 >> 1),  /* 0x39 */
+		.irq = MSM_GPIO_TO_INT(GPIO_MHL_INT_N),
+		.platform_data = &sii8334_mhl_pdata,
 	},
 	{
-		I2C_BOARD_INFO("Sil-833x", 0x7A >> 1),  /* 0x3D */
+		I2C_BOARD_INFO(MHL_I2C_DEVICE_TYPE, 0x7A >> 1),  /* 0x3D */
 	},
 	{
-		I2C_BOARD_INFO("Sil-833x", 0x92 >> 1), /* 0x49 */
+		I2C_BOARD_INFO(MHL_I2C_DEVICE_TYPE, 0x92 >> 1), /* 0x49 */
 	},
 	{
-		I2C_BOARD_INFO("Sil-833x", 0x9A >> 1), /* 0x4D */
+		I2C_BOARD_INFO(MHL_I2C_DEVICE_TYPE, 0x9A >> 1), /* 0x4D */
 	},
 	{
-		I2C_BOARD_INFO("Sil-833x", 0xC8 >> 1), /*  0x64 */
+		I2C_BOARD_INFO(MHL_I2C_DEVICE_TYPE, 0xC8 >> 1), /*  0x64 */
 	},
 };
 
@@ -545,8 +545,8 @@ static struct i2c_registry i2c_mhl_devices __initdata = {
 static void __init lge_add_i2c_mhl_device(void)
 {
 	i2c_register_board_info(i2c_mhl_devices.bus,
-	i2c_mhl_devices.info,
-	i2c_mhl_devices.len);
+							i2c_mhl_devices.info,
+							i2c_mhl_devices.len);
 }
 
 #endif  /* CONFIG_SII8334_MHL_TX */
@@ -557,9 +557,10 @@ static void __init lge_add_i2c_mhl_device(void)
 
 static unsigned hall_ic_int_gpio[] = {GPIO_POUCH_INT, GPIO_CARKIT_INT};
 
-static unsigned hall_ic_gpio[] = {	
-	GPIO_CFG(22, 0, GPIO_CFG_INPUT,  GPIO_CFG_NO_PULL, GPIO_CFG_2MA),	
-	GPIO_CFG(23, 0, GPIO_CFG_INPUT,  GPIO_CFG_NO_PULL, GPIO_CFG_2MA),};
+static unsigned hall_ic_gpio[] = {
+	GPIO_CFG(22, 0, GPIO_CFG_INPUT,  GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+	GPIO_CFG(23, 0, GPIO_CFG_INPUT,  GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+};
 
 static void __init hall_ic_init(void)
 {
@@ -626,16 +627,16 @@ void __init apq8064_init_misc(void)
 #endif
 
 #if defined(CONFIG_ANDROID_VIBRATOR)
-#if defined(CONFIG_MACH_APQ8064_J1V) || defined(CONFIG_MACH_APQ8064_J1U) || defined(CONFIG_MACH_APQ8064_J1A) || defined(CONFIG_MACH_APQ8064_J1SP) || defined(CONFIG_MACH_APQ8064_J1D) || defined(CONFIG_MACH_APQ8064_J1SK) || defined(CONFIG_MACH_APQ8064_J1KT) || defined(CONFIG_MACH_APQ8064_J1KD) || defined(CONFIG_MACH_APQ8064_J1R) || defined(CONFIG_MACH_APQ8064_J1B)|| defined(CONFIG_MACH_APQ8064_J1VD)|| defined(CONFIG_MACH_APQ8064_J1X)|| defined(CONFIG_MACH_APQ8064_J1TL) || defined(CONFIG_MACH_APQ8064_J1TM) || defined(CONFIG_MACH_APQ8064_GKU) || defined(CONFIG_MACH_APQ8064_GKSK) || defined(CONFIG_MACH_APQ8064_GKKT)
+#if defined(CONFIG_MACH_APQ8064_J1V) || defined(CONFIG_MACH_APQ8064_J1U) || defined(CONFIG_MACH_APQ8064_J1A) || defined(CONFIG_MACH_APQ8064_J1SP) || defined(CONFIG_MACH_APQ8064_J1D) || defined(CONFIG_MACH_APQ8064_J1SK) || defined(CONFIG_MACH_APQ8064_J1KT) || defined(CONFIG_MACH_APQ8064_J1KD) || defined(CONFIG_MACH_APQ8064_J1R) || defined(CONFIG_MACH_APQ8064_J1B)|| defined(CONFIG_MACH_APQ8064_J1VD)|| defined(CONFIG_MACH_APQ8064_J1X)|| defined(CONFIG_MACH_APQ8064_J1TL) || defined(CONFIG_MACH_APQ8064_J1TM) || defined(CONFIG_MACH_APQ8064_GKU) || defined(CONFIG_MACH_APQ8064_GKSK) || defined(CONFIG_MACH_APQ8064_GKKT) || defined(CONFIG_MACH_APQ8064_GKATT)
 	if (vib_flag == 0) {
 		platform_add_devices(misc_devices, ARRAY_SIZE(misc_devices));
 	}
 #endif
 #endif
 
-#if defined(CONFIG_SII8334_MHL_TX)
-	mhl_gpio_init();
-    lge_add_i2c_mhl_device();
+#ifdef CONFIG_SII8334_MHL_TX
+	sii8334_mhl_gpio_init();
+	lge_add_i2c_mhl_device();
 #endif 
 
 #ifdef CONFIG_BU52031NVX

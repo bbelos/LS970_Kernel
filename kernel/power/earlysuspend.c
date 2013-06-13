@@ -19,12 +19,14 @@
 #include <linux/rtc.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #include <linux/kallsyms.h>
 #include <linux/debugfs.h>
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 
 #include "power.h"
+
+#ifdef CONFIG_MACH_LGE
+#include <mach/lge/lge_blocking_monitor.h>
+#endif
 
 enum {
 	DEBUG_USER_STATE = 1U << 0,
@@ -48,7 +50,6 @@ enum {
 };
 static int state;
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 enum log_resume_step {
 	RESUME_KICK = 0,
@@ -79,7 +80,15 @@ struct resume_delay resume_total = {
 	.count = 0,
 };
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
+#ifdef CONFIG_MACH_LGE
+#define WATCHDOG_EXPIRES_TIME		(5 * HZ)
+static struct timer_list es_watchdog_timer;
+
+static int early_suspend_monitor_id;
+static int late_resume_monitor_id;
+#endif
+
 void register_early_suspend(struct early_suspend *handler)
 {
 	struct list_head *pos;
@@ -92,7 +101,6 @@ void register_early_suspend(struct early_suspend *handler)
 			break;
 	}
 	list_add_tail(&handler->link, pos);
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 	handler->resume_avg = 0;
 	handler->resume_max = 0;
@@ -101,7 +109,6 @@ void register_early_suspend(struct early_suspend *handler)
 	handler->suspend_max = 0;
 	handler->suspend_count = 0;
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 	if ((state & SUSPENDED) && handler->suspend)
 		handler->suspend(handler);
 	mutex_unlock(&early_suspend_lock);
@@ -122,9 +129,13 @@ static void early_suspend(struct work_struct *work)
 	unsigned long irqflags;
 	int abort = 0;
 
-	save_earlysuspend_step(EARLYSUSPEND_START);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#ifdef CONFIG_MACH_LGE
+	start_monitor_blocking(early_suspend_monitor_id,
+		jiffies + usecs_to_jiffies(5000000));
+#endif
+	save_earlysuspend_step(EARLYSUSPEND_START);  // LGE_UPDATE
 	mutex_lock(&early_suspend_lock);
-	save_earlysuspend_step(EARLYSUSPEND_MUTEXLOCK);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_earlysuspend_step(EARLYSUSPEND_MUTEXLOCK);  // LGE_UPDATE
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPEND_REQUESTED)
 		state |= SUSPENDED;
@@ -141,24 +152,38 @@ static void early_suspend(struct work_struct *work)
 
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("early_suspend: call handlers\n");
-	save_earlysuspend_step(EARLYSUSPEND_CHAINSTART);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_earlysuspend_step(EARLYSUSPEND_CHAINSTART);  // LGE_UPDATE
+#ifdef CONFIG_MACH_LGE
+	es_watchdog_timer.expires = jiffies + WATCHDOG_EXPIRES_TIME;
+	add_timer(&es_watchdog_timer);
+#endif
 	list_for_each_entry(pos, &early_suspend_handlers, link) {
 		if (pos->suspend != NULL) {
+#ifdef CONFIG_MACH_LGE
+    		char sym[KSYM_SYMBOL_LEN];
+
+			sprint_symbol(sym, (unsigned long)pos->suspend);
+			save_earlysuspend_call(sym);
+    		printk(KERN_INFO"%s: %s\n", __func__, sym);
+#else
 			if (debug_mask & DEBUG_VERBOSE)
 				pr_info("early_suspend: calling %pf\n", pos->suspend);
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#endif
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 			early_suspend_call_chain(pos);
 #else
 			pos->suspend(pos);
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 		}
 	}
-	save_earlysuspend_call(NULL);	//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
-	save_earlysuspend_step(EARLYSUSPEND_CHAINDONE);			//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#ifdef CONFIG_MACH_LGE
+	del_timer(&es_watchdog_timer);
+#endif
+	save_earlysuspend_call(NULL);  // LGE_UPDATE
+
+	save_earlysuspend_step(EARLYSUSPEND_CHAINDONE);  // LGE_UPDATE
 	mutex_unlock(&early_suspend_lock);
-	save_earlysuspend_step(EARLYSUSPEND_MUTEXUNLOCK);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_earlysuspend_step(EARLYSUSPEND_MUTEXUNLOCK);  // LGE_UPDATE
 
 	suspend_sys_sync_queue();
 	save_earlysuspend_step(EARLYSUSPEND_SYNCDONE);
@@ -168,6 +193,10 @@ abort:
 		wake_unlock(&main_wake_lock);
 	spin_unlock_irqrestore(&state_lock, irqflags);
 	save_earlysuspend_step(EARLYSUSPEND_END);
+
+#ifdef CONFIG_MACH_LGE
+	end_monitor_blocking(early_suspend_monitor_id);
+#endif
 }
 
 static void late_resume(struct work_struct *work)
@@ -176,14 +205,17 @@ static void late_resume(struct work_struct *work)
 	unsigned long irqflags;
 	int abort = 0;
 
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#ifdef CONFIG_MACH_LGE
+	start_monitor_blocking(late_resume_monitor_id,
+		jiffies + usecs_to_jiffies(5000000));
+#endif
+
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 	log_resume(RESUME_ENTRY);
 #endif
 	save_lateresume_step(LATERESUME_START);
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 	mutex_lock(&early_suspend_lock);
-	save_lateresume_step(LATERESUME_MUTEXLOCK);		//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_lateresume_step(LATERESUME_MUTEXLOCK);  // LGE_UPDATE
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPENDED)
 		state &= ~SUSPENDED;
@@ -198,32 +230,48 @@ static void late_resume(struct work_struct *work)
 	}
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: call handlers\n");
-	save_lateresume_step(LATERESUME_CHAINSTART);	//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_lateresume_step(LATERESUME_CHAINSTART);  // LGE_UPDATE
+#ifdef CONFIG_MACH_LGE
+	es_watchdog_timer.expires = jiffies + WATCHDOG_EXPIRES_TIME;
+	add_timer(&es_watchdog_timer);
+#endif
 	list_for_each_entry_reverse(pos, &early_suspend_handlers, link) {
 		if (pos->resume != NULL) {
+#ifdef CONFIG_MACH_LGE
+    		char sym[KSYM_SYMBOL_LEN];
+
+    		sprint_symbol(sym, (unsigned long)pos->resume);
+			save_lateresume_call(sym);
+    		printk(KERN_INFO"%s: %s\n", __func__, sym);
+#else
 			if (debug_mask & DEBUG_VERBOSE)
 				pr_info("late_resume: calling %pf\n", pos->resume);
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#endif
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 			late_resume_call_chain(pos);
 #else
 			pos->resume(pos);
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 		}
 	}
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+#ifdef CONFIG_MACH_LGE
+	del_timer(&es_watchdog_timer);
+#endif
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 	log_resume(RESUME_EXIT);
 #endif
 	save_lateresume_call(NULL);
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: done\n");
-	save_lateresume_step(LATERESUME_CHAINDONE);	//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_lateresume_step(LATERESUME_CHAINDONE);  // LGE_UPDATE
 abort:
 	mutex_unlock(&early_suspend_lock);
-	save_lateresume_step(LATERESUME_END);	//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+	save_lateresume_step(LATERESUME_END);  // LGE_UPDATE
+
+#ifdef CONFIG_MACH_LGE
+	end_monitor_blocking(late_resume_monitor_id);
+#endif
 }
 
 void request_suspend_state(suspend_state_t new_state)
@@ -248,16 +296,20 @@ void request_suspend_state(suspend_state_t new_state)
 	}
 	if (!old_sleep && new_state != PM_SUSPEND_ON) {
 		state |= SUSPEND_REQUESTED;
+#ifdef CONFIG_MACH_LGE
+		pr_info("queue early_suspend_work\n");
+#endif
 		queue_work(suspend_work_queue, &early_suspend_work);
 	} else if (old_sleep && new_state == PM_SUSPEND_ON) {
 		state &= ~SUSPEND_REQUESTED;
 		wake_lock(&main_wake_lock);
+#ifdef CONFIG_MACH_LGE
+		pr_info("queue late_resume_work\n");
+#endif
 		queue_work(suspend_work_queue, &late_resume_work);
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 		log_resume(RESUME_KICK);
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 	}
 	requested_suspend_state = new_state;
 	spin_unlock_irqrestore(&state_lock, irqflags);
@@ -267,7 +319,7 @@ suspend_state_t get_suspend_state(void)
 {
 	return requested_suspend_state;
 }
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
 #ifdef CONFIG_DEBUG_FS
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 static inline void log_resume(enum log_resume_step step)
@@ -289,8 +341,9 @@ static inline void log_resume(enum log_resume_step step)
 	ts_sub = timespec_sub(ts_current, ts_resume_kick);
 	msec = ts_sub.tv_sec + ts_sub.tv_nsec / NSEC_PER_MSEC;
 
+	record->count++;
 	record->avg = ((record->avg * record->count) + msec)
-							/ (++record->count);
+							/ (record->count);
 	if (msec > record->max)
 		record->max = msec;
 
@@ -308,8 +361,9 @@ static inline void late_resume_call_chain(struct early_suspend *pos)
 
 	ts_sub = timespec_sub(ts_exit, ts_entry);
 	msec = ts_sub.tv_sec + ts_sub.tv_nsec / NSEC_PER_MSEC;
+	pos->resume_count++;
 	pos->resume_avg = ((pos->resume_avg * pos->resume_count) + msec)
-							/ (++pos->resume_count);
+							/ (pos->resume_count);
 	if (msec > pos->resume_max)
 		pos->resume_max = msec;
 }
@@ -325,8 +379,9 @@ static inline void early_suspend_call_chain(struct early_suspend *pos)
 
 	ts_sub = timespec_sub(ts_exit, ts_entry);
 	msec = ts_sub.tv_sec + ts_sub.tv_nsec / NSEC_PER_MSEC;
+	pos->suspend_count++;
 	pos->suspend_avg = ((pos->suspend_avg * pos->suspend_count) + msec)
-							/ (++pos->suspend_count);
+							/ (pos->suspend_count);
 	if (msec > pos->suspend_max)
 		pos->suspend_max = msec;
 }
@@ -394,4 +449,31 @@ static int __init earlysuspend_func_time_debug_init(void)
 late_initcall(earlysuspend_func_time_debug_init);
 #endif
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
+#ifdef CONFIG_MACH_LGE
+static void earlysuspend_watchdog_timer_func(unsigned long nr)
+{
+	BUG();
+}
+
+static int __init earlysuspend_watchdog_timer_init(void)
+{
+	es_watchdog_timer.function = earlysuspend_watchdog_timer_func;
+
+	init_timer(&es_watchdog_timer);
+
+	early_suspend_monitor_id = create_blocking_monitor("early_suspend");
+
+	if (early_suspend_monitor_id < 0)
+		return early_suspend_monitor_id;
+
+	late_resume_monitor_id = create_blocking_monitor("late_resume");
+
+	if (late_resume_monitor_id < 0)
+		return late_resume_monitor_id;
+
+	return 0;
+}
+
+late_initcall(earlysuspend_watchdog_timer_init);
+#endif

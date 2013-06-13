@@ -40,6 +40,8 @@
 /* "Clear" value for the connection parameter struct */
 #define SPSRM_CLEAR     0xcccccccc
 
+extern u32 d_type;
+
 #ifdef CONFIG_DEBUG_FS
 extern u8 debugfs_record_enabled;
 extern u8 logging_option;
@@ -181,6 +183,7 @@ struct sps_mem_stats {
 #ifdef CONFIG_DEBUG_FS
 /* record debug info for debugfs */
 void sps_debugfs_record(const char *);
+#endif
 
 /* output the content of BAM-level registers */
 void print_bam_reg(void *);
@@ -193,7 +196,12 @@ void print_bam_selected_reg(void *);
 
 /* output the content of selected BAM pipe registers */
 void print_bam_pipe_selected_reg(void *, u32);
-#endif
+
+/* output descriptor FIFO of a pipe */
+void print_bam_pipe_desc_fifo(void *, u32);
+
+/* output BAM_TEST_BUS_REG */
+void print_bam_test_bus_reg(void *, u32);
 
 /**
  * Translate physical to virtual address

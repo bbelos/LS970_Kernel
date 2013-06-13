@@ -16,8 +16,6 @@
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <mach/mdm-peripheral.h>
-
 
 /**
  *	tty_buffer_free_all		-	free buffers used by a tty
@@ -187,7 +185,6 @@ static struct tty_buffer *tty_buffer_find(struct tty_struct *tty, size_t size)
 	/* Should possibly check if this fails for the largest buffer we
 	   have queued and recycle that ? */
 }
-
 /**
  *	__tty_buffer_request_room		-	grow tty buffer if needed
  *	@tty: tty structure
@@ -224,6 +221,7 @@ static int __tty_buffer_request_room(struct tty_struct *tty, size_t size)
 
 	return size;
 }
+
 
 /**
  *	tty_buffer_request_room		-	grow tty buffer if needed
@@ -512,11 +510,6 @@ static void flush_to_ldisc(struct work_struct *work)
 			flag_buf = head->flag_buf_ptr + head->read;
 			head->read += count;
 			spin_unlock_irqrestore(&tty->buf.lock, flags);
-			if(tty->start_debug){
-				dbg_log_event(NULL, "f_t_l_d:head->read",head->read, "head->commit", head->commit,
-					"receive_room ", tty->receive_room );
-			}
-			tty->ldisc_cnt += count;
 			disc->ops->receive_buf(tty, char_buf,
 							flag_buf, count);
 			spin_lock_irqsave(&tty->buf.lock, flags);

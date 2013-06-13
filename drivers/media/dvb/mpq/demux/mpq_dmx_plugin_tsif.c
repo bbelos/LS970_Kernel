@@ -26,8 +26,8 @@
 #define DMX_TSIF_MAX_SECTION_FILTER_NUM	64
 
 /* When TSIF driver notifies demux that new packets are received */
-#define DMX_TSIF_PACKETS_IN_CHUNK_DEF		16
-#define DMX_TSIF_CHUNKS_IN_BUF			8
+#define DMX_TSIF_PACKETS_IN_CHUNK_DEF		512
+#define DMX_TSIF_CHUNKS_IN_BUF			16
 #define DMX_TSIF_TIME_LIMIT			10000
 
 /* TSIF_DRIVER_MODE: 3 means manual control from debugfs. use 1 normally. */
@@ -414,8 +414,7 @@ static int mpq_tsif_dmx_stop(struct mpq_demux *mpq_demux)
 static int mpq_tsif_dmx_start_filtering(struct dvb_demux_feed *feed)
 {
 	int ret = 0;
-	struct mpq_demux *mpq_demux =
-		(struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 
 	MPQ_DVB_DBG_PRINT(
 		"%s(%d) executed\n",
@@ -482,8 +481,7 @@ static int mpq_tsif_dmx_start_filtering(struct dvb_demux_feed *feed)
 static int mpq_tsif_dmx_stop_filtering(struct dvb_demux_feed *feed)
 {
 	int ret = 0;
-	struct mpq_demux *mpq_demux =
-		(struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 
 	MPQ_DVB_DBG_PRINT(
 		"%s(%d) executed\n",
@@ -559,7 +557,7 @@ static int mpq_tsif_dmx_write_to_decoder(
 static int mpq_tsif_dmx_get_caps(struct dmx_demux *demux,
 				struct dmx_caps *caps)
 {
-	struct dvb_demux *dvb_demux = (struct dvb_demux *)demux->priv;
+	struct dvb_demux *dvb_demux = demux->priv;
 
 	if ((dvb_demux == NULL) || (caps == NULL)) {
 		MPQ_DVB_ERR_PRINT(
@@ -627,6 +625,9 @@ static int mpq_tsif_dmx_init(
 	mpq_demux->demux.decoder_fullness_abort =
 		mpq_dmx_decoder_fullness_abort;
 
+	mpq_demux->demux.decoder_buffer_status =
+		mpq_dmx_decoder_buffer_status;
+
 	/* Initialize dvb_demux object */
 	result = dvb_dmx_init(&mpq_demux->demux);
 	if (result < 0) {
@@ -640,7 +641,6 @@ static int mpq_tsif_dmx_init(
 	mpq_demux->dmxdev.capabilities =
 		DMXDEV_CAP_DUPLEX |
 		DMXDEV_CAP_PULL_MODE |
-		DMXDEV_CAP_PCR_EXTRACTION |
 		DMXDEV_CAP_INDEXING;
 
 	mpq_demux->dmxdev.demux->set_source = mpq_dmx_set_source;

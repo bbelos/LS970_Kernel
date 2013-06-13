@@ -216,33 +216,33 @@ DEFINE_CLK_RPM_BRANCH(cxo_clk, cxo_a_clk, CXO, 19200000);
 
 static DEFINE_SPINLOCK(soft_vote_lock);
 
-static int pll_acpu_vote_clk_enable(struct clk *clk)
+static int pll_acpu_vote_clk_enable(struct clk *c)
 {
 	int ret = 0;
 	unsigned long flags;
-	struct pll_vote_clk *pll = to_pll_vote_clk(clk);
+	struct pll_vote_clk *pllv = to_pll_vote_clk(c);
 
 	spin_lock_irqsave(&soft_vote_lock, flags);
 
-	if (!*pll->soft_vote)
-		ret = pll_vote_clk_enable(clk);
+	if (!*pllv->soft_vote)
+		ret = pll_vote_clk_enable(c);
 	if (ret == 0)
-		*pll->soft_vote |= (pll->soft_vote_mask);
+		*pllv->soft_vote |= (pllv->soft_vote_mask);
 
 	spin_unlock_irqrestore(&soft_vote_lock, flags);
 	return ret;
 }
 
-static void pll_acpu_vote_clk_disable(struct clk *clk)
+static void pll_acpu_vote_clk_disable(struct clk *c)
 {
 	unsigned long flags;
-	struct pll_vote_clk *pll = to_pll_vote_clk(clk);
+	struct pll_vote_clk *pllv = to_pll_vote_clk(c);
 
 	spin_lock_irqsave(&soft_vote_lock, flags);
 
-	*pll->soft_vote &= ~(pll->soft_vote_mask);
-	if (!*pll->soft_vote)
-		pll_vote_clk_disable(clk);
+	*pllv->soft_vote &= ~(pllv->soft_vote_mask);
+	if (!*pllv->soft_vote)
+		pll_vote_clk_disable(c);
 
 	spin_unlock_irqrestore(&soft_vote_lock, flags);
 }
@@ -250,7 +250,6 @@ static void pll_acpu_vote_clk_disable(struct clk *clk)
 static struct clk_ops clk_ops_pll_acpu_vote = {
 	.enable = pll_acpu_vote_clk_enable,
 	.disable = pll_acpu_vote_clk_disable,
-	.auto_off = pll_acpu_vote_clk_disable,
 	.is_enabled = pll_vote_clk_is_enabled,
 	.get_parent = pll_vote_clk_get_parent,
 };
@@ -273,7 +272,6 @@ static struct pll_vote_clk pll0_clk = {
 		.rate = 276000000,
 		.ops = &clk_ops_pll_acpu_vote,
 		CLK_INIT(pll0_clk.c),
-		.warned = true,
 	},
 };
 
@@ -289,7 +287,6 @@ static struct pll_vote_clk pll0_activeonly_clk = {
 		.rate = 276000000,
 		.ops = &clk_ops_pll_acpu_vote,
 		CLK_INIT(pll0_activeonly_clk.c),
-		.warned = true,
 	},
 };
 
@@ -304,7 +301,6 @@ static struct pll_vote_clk pll4_clk = {
 		.rate = 393216000,
 		.ops = &clk_ops_pll_vote,
 		CLK_INIT(pll4_clk.c),
-		.warned = true,
 	},
 };
 
@@ -323,7 +319,6 @@ static struct pll_vote_clk pll8_clk = {
 		.rate = 384000000,
 		.ops = &clk_ops_pll_acpu_vote,
 		CLK_INIT(pll8_clk.c),
-		.warned = true,
 	},
 };
 
@@ -339,7 +334,6 @@ static struct pll_vote_clk pll8_activeonly_clk = {
 		.rate = 384000000,
 		.ops = &clk_ops_pll_acpu_vote,
 		CLK_INIT(pll8_activeonly_clk.c),
-		.warned = true,
 	},
 };
 
@@ -350,7 +344,6 @@ static struct pll_clk pll9_activeonly_clk = {
 		.rate = 440000000,
 		.ops = &clk_ops_local_pll,
 		CLK_INIT(pll9_activeonly_clk.c),
-		.warned = true,
 	},
 };
 
@@ -365,7 +358,6 @@ static struct pll_vote_clk pll14_clk = {
 		.rate = 480000000,
 		.ops = &clk_ops_pll_vote,
 		CLK_INIT(pll14_clk.c),
-		.warned = true,
 	},
 };
 
@@ -1181,6 +1173,7 @@ static struct clk_freq_tbl clk_tbl_aif_osr[] = {
 			.dbg_name = #i "_clk", \
 			.ops = &clk_ops_cdiv, \
 			CLK_INIT(i##_clk.c), \
+			.rate = ULONG_MAX, \
 		}, \
 	}
 
@@ -1200,6 +1193,7 @@ static struct clk_freq_tbl clk_tbl_aif_osr[] = {
 			.dbg_name = #i "_clk", \
 			.ops = &clk_ops_cdiv, \
 			CLK_INIT(i##_clk.c), \
+			.rate = ULONG_MAX, \
 		}, \
 	}
 
@@ -1273,6 +1267,7 @@ static struct rcg_clk pcm_clk = {
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP1(LOW, 24576000),
 		CLK_INIT(pcm_clk.c),
+		.rate = ULONG_MAX,
 	},
 };
 
@@ -1373,12 +1368,16 @@ static DEFINE_CLK_VOTER(dfab_bam_dmux_clk, &dfab_clk.c, 0);
 static DEFINE_CLK_VOTER(dfab_msmbus_clk, &dfab_clk.c, 0);
 static DEFINE_CLK_VOTER(dfab_msmbus_a_clk, &dfab_a_clk.c, 0);
 static DEFINE_CLK_VOTER(ebi1_msmbus_clk, &ebi1_clk.c, LONG_MAX);
+static DEFINE_CLK_VOTER(ebi1_msmbus_a_clk, &ebi1_a_clk.c, LONG_MAX);
+static DEFINE_CLK_VOTER(ebi1_acpu_a_clk, &ebi1_a_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(ebi1_adm_clk, &ebi1_clk.c, 0);
+static DEFINE_CLK_VOTER(sfab_msmbus_a_clk, &sfab_a_clk.c, LONG_MAX);
+static DEFINE_CLK_VOTER(sfab_acpu_a_clk, &sfab_a_clk.c, LONG_MAX);
 
 #ifdef CONFIG_DEBUG_FS
 struct measure_sel {
 	u32 test_vector;
-	struct clk *clk;
+	struct clk *c;
 };
 
 static DEFINE_CLK_MEASURE(q6sw_clk);
@@ -1449,12 +1448,12 @@ static struct measure_sel measure_mux[] = {
 	{ TEST_LPA_HS(0x00), &q6_func_clk },
 };
 
-static struct measure_sel *find_measure_sel(struct clk *clk)
+static struct measure_sel *find_measure_sel(struct clk *c)
 {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(measure_mux); i++)
-		if (measure_mux[i].clk == clk)
+		if (measure_mux[i].c == c)
 			return &measure_mux[i];
 	return NULL;
 }
@@ -1464,7 +1463,7 @@ static int measure_clk_set_parent(struct clk *c, struct clk *parent)
 	int ret = 0;
 	u32 clk_sel;
 	struct measure_sel *p;
-	struct measure_clk *clk = to_measure_clk(c);
+	struct measure_clk *measure = to_measure_clk(c);
 	unsigned long flags;
 
 	if (!parent)
@@ -1480,9 +1479,9 @@ static int measure_clk_set_parent(struct clk *c, struct clk *parent)
 	 * Program the test vector, measurement period (sample_ticks)
 	 * and scaling multiplier.
 	 */
-	clk->sample_ticks = 0x10000;
+	measure->sample_ticks = 0x10000;
 	clk_sel = p->test_vector & TEST_CLK_SEL_MASK;
-	clk->multiplier = 1;
+	measure->multiplier = 1;
 	switch (p->test_vector >> TEST_TYPE_SHIFT) {
 	case TEST_TYPE_PER_LS:
 		writel_relaxed(0x4030D00|BVAL(7, 0, clk_sel), CLK_TEST_REG);
@@ -1541,7 +1540,7 @@ static unsigned long measure_clk_get_rate(struct clk *c)
 	unsigned long flags;
 	u32 pdm_reg_backup, ringosc_reg_backup;
 	u64 raw_count_short, raw_count_full;
-	struct measure_clk *clk = to_measure_clk(c);
+	struct measure_clk *measure = to_measure_clk(c);
 	unsigned ret;
 
 	spin_lock_irqsave(&local_clock_reg_lock, flags);
@@ -1562,7 +1561,7 @@ static unsigned long measure_clk_get_rate(struct clk *c)
 	/* Run a short measurement. (~1 ms) */
 	raw_count_short = run_measurement(0x1000);
 	/* Run a full measurement. (~14 ms) */
-	raw_count_full = run_measurement(clk->sample_ticks);
+	raw_count_full = run_measurement(measure->sample_ticks);
 
 	writel_relaxed(ringosc_reg_backup, RINGOSC_NS_REG);
 	writel_relaxed(pdm_reg_backup, PDM_CLK_NS_REG);
@@ -1573,8 +1572,8 @@ static unsigned long measure_clk_get_rate(struct clk *c)
 	else {
 		/* Compute rate in Hz. */
 		raw_count_full = ((raw_count_full * 10) + 15) * 4800000;
-		do_div(raw_count_full, ((clk->sample_ticks * 10) + 35));
-		ret = (raw_count_full * clk->multiplier);
+		do_div(raw_count_full, ((measure->sample_ticks * 10) + 35));
+		ret = (raw_count_full * measure->multiplier);
 	}
 
 	/* Route dbg_hs_clk to PLLTEST.  300mV single-ended amplitude. */
@@ -1584,12 +1583,12 @@ static unsigned long measure_clk_get_rate(struct clk *c)
 	return ret;
 }
 #else /* !CONFIG_DEBUG_FS */
-static int measure_clk_set_parent(struct clk *clk, struct clk *parent)
+static int measure_clk_set_parent(struct clk *c, struct clk *parent)
 {
 	return -EINVAL;
 }
 
-static unsigned long measure_clk_get_rate(struct clk *clk)
+static unsigned long measure_clk_get_rate(struct clk *c)
 {
 	return 0;
 }
@@ -1624,18 +1623,23 @@ static struct clk_lookup msm_clocks_9615[] = {
 
 	CLK_LOOKUP("measure",	measure_clk.c,	"debug"),
 
+	CLK_LOOKUP("bus_clk",		cfpb_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		cfpb_a_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		dfab_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		dfab_a_clk.c,	""),
+	CLK_LOOKUP("mem_clk",		ebi1_clk.c,	""),
+	CLK_LOOKUP("mem_clk",		ebi1_a_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		sfab_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		sfab_a_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		sfpb_clk.c,	""),
+	CLK_LOOKUP("bus_clk",		sfpb_a_clk.c,	""),
+
 	CLK_LOOKUP("bus_clk",		sfab_clk.c,		"msm_sys_fab"),
-	CLK_LOOKUP("bus_a_clk",		sfab_a_clk.c,		"msm_sys_fab"),
+	CLK_LOOKUP("bus_a_clk",		sfab_msmbus_a_clk.c,	"msm_sys_fab"),
 	CLK_LOOKUP("mem_clk",		ebi1_msmbus_clk.c,	"msm_bus"),
-	CLK_LOOKUP("mem_a_clk",		ebi1_a_clk.c,		"msm_bus"),
+	CLK_LOOKUP("mem_a_clk",		ebi1_msmbus_a_clk.c,	"msm_bus"),
 	CLK_LOOKUP("dfab_clk",		dfab_msmbus_clk.c,	"msm_bus"),
 	CLK_LOOKUP("dfab_a_clk",	dfab_msmbus_a_clk.c,	"msm_bus"),
-
-	CLK_LOOKUP("bus_clk",		sfpb_clk.c,	NULL),
-	CLK_LOOKUP("bus_a_clk",		sfpb_a_clk.c,	NULL),
-	CLK_LOOKUP("bus_clk",		cfpb_clk.c,	NULL),
-	CLK_LOOKUP("bus_a_clk",		cfpb_a_clk.c,	NULL),
-	CLK_LOOKUP("ebi1_clk",		ebi1_clk.c,	NULL),
 
 	CLK_LOOKUP("core_clk",		gp0_clk.c,	""),
 	CLK_LOOKUP("core_clk",		gp1_clk.c,	""),
@@ -1720,6 +1724,8 @@ static struct clk_lookup msm_clocks_9615[] = {
 	CLK_LOOKUP("dfab_clk",		dfab_sps_clk.c,		"msm_sps"),
 	CLK_LOOKUP("bus_clk",		dfab_bam_dmux_clk.c,	"BAM_RMNT"),
 	CLK_LOOKUP("mem_clk",		ebi1_adm_clk.c, "msm_dmov"),
+	CLK_LOOKUP("mem_clk",		ebi1_acpu_a_clk.c, ""),
+	CLK_LOOKUP("bus_clk",		sfab_acpu_a_clk.c, ""),
 
 	CLK_LOOKUP("iface_clk",		ce1_p_clk.c,		"qce.0"),
 	CLK_LOOKUP("iface_clk",		ce1_p_clk.c,		"qcrypto.0"),
@@ -1801,14 +1807,14 @@ static void __init msm9615_clock_pre_init(void)
 		regval |= BIT(12);
 		writel_relaxed(regval, BB_PLL0_TEST_CTL_REG);
 
-		configure_pll(&pll0_config, &pll0_regs, 1);
+		configure_sr_pll(&pll0_config, &pll0_regs, 1);
 	}
 
 	/* Check if PLL14 is enabled in FSM mode */
 	is_pll_enabled  = readl_relaxed(BB_PLL14_STATUS_REG) & BIT(16);
 
 	if (!is_pll_enabled)
-		configure_pll(&pll14_config, &pll14_regs, 1);
+		configure_sr_pll(&pll14_config, &pll14_regs, 1);
 	else if (!(readl_relaxed(BB_PLL14_MODE_REG) & BIT(20)))
 		WARN(1, "PLL14 enabled in non-FSM mode!\n");
 

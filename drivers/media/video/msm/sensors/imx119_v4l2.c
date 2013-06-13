@@ -163,6 +163,7 @@ static struct msm_sensor_output_info_t imx119_dimensions[] = {
 	},
 };
 
+#if 0 // Move to userspace
 static struct msm_camera_csid_vc_cfg imx119_cid_cfg[] = {
 	{0, CSI_RAW10, CSI_DECODE_10BIT},
 	{1, CSI_EMBED_DATA, CSI_DECODE_8BIT},
@@ -187,12 +188,19 @@ static struct msm_camera_csi2_params imx119_csi_params = {
 static struct msm_camera_csi2_params *imx119_csi_params_array[] = {
 	&imx119_csi_params,
 };
+#endif
 
 static struct msm_sensor_output_reg_addr_t imx119_reg_addr = {
 	.x_output = 0x34C,
 	.y_output = 0x34E,
 	.line_length_pclk = 0x342,
 	.frame_length_lines = 0x340,
+};
+
+static enum msm_camera_vreg_name_t imx119_veg_seq[] = {
+	CAM_VDIG,
+	CAM_VIO,
+	CAM_VANA,
 };
 
 static struct msm_sensor_id_info_t imx119_id_info = {
@@ -294,11 +302,13 @@ static struct msm_sensor_ctrl_t imx119_s_ctrl = {
 	.msm_sensor_reg = &imx119_regs,
 	.sensor_i2c_client = &imx119_sensor_i2c_client,
 	.sensor_i2c_addr = 0x6E,
+	.vreg_seq = imx119_veg_seq,
+	.num_vreg_seq = ARRAY_SIZE(imx119_veg_seq),
 	.sensor_output_reg_addr = &imx119_reg_addr,
 	.sensor_id_info = &imx119_id_info,
 	.sensor_exp_gain_info = &imx119_exp_gain_info,
 	.cam_mode = MSM_SENSOR_MODE_INVALID,
-	.csi_params = &imx119_csi_params_array[0],
+//	.csi_params = &imx119_csi_params_array[0],
 	.msm_sensor_mutex = &imx119_mut,
 	.sensor_i2c_driver = &imx119_i2c_driver,
 	.sensor_v4l2_subdev_info = imx119_subdev_info,

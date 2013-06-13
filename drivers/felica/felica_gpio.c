@@ -97,3 +97,44 @@ int felica_gpio_read(int gpionum)
 {
   return gpio_get_value(gpionum);
 }
+/*
+* Description :
+* Input :
+* Output :
+*/
+int felica_get_rfs_gpio_num(void)
+{
+  int gpionum = GPIO_FELICA_RFS;
+
+  if (lge_get_board_revno() > HW_REV_B)
+  {
+    gpionum = GPIO_FELICA_RFS;
+  }
+  else
+  {
+    gpionum = GPIO_FELICA_RFS_REV_B;  
+  }
+
+	return gpionum;
+}
+
+/*
+* Description :
+* Input :
+* Output :
+*/
+int felica_get_int_gpio_num(void)
+{
+  int gpionum = GPIO_FELICA_INT;
+
+  if (lge_get_board_revno() > HW_REV_B)
+  {
+    gpionum = GPIO_FELICA_INT;
+  }
+  else
+  {
+    gpionum = GPIO_FELICA_INT_REV_B;  
+  }
+
+	return gpionum;
+}

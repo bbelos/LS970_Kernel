@@ -46,13 +46,22 @@ enum msm_bus_dbg_op_type {
 	MSM_BUS_DBG_OP = 1,
 };
 
+enum msm_bus_hw_sel {
+	MSM_BUS_RPM = 0,
+	MSM_BUS_NOC,
+	MSM_BUS_BIMC,
+};
+
 extern struct bus_type msm_bus_type;
 
 struct msm_bus_node_info {
 	unsigned int id;
 	unsigned int priv_id;
+	unsigned int mas_hw_id;
+	unsigned int slv_hw_id;
 	int gateway;
 	int *masterp;
+	int *qport;
 	int num_mports;
 	int *slavep;
 	int num_sports;
@@ -61,10 +70,16 @@ struct msm_bus_node_info {
 	int ahb;
 	int hw_sel;
 	const char *slaveclk[NUM_CTX];
-	const char *memclk;
+	const char *memclk[NUM_CTX];
 	unsigned int buswidth;
 	unsigned int ws;
 	unsigned int mode;
+	unsigned int perm_mode;
+	unsigned int prio_lvl;
+	unsigned int prio_rd;
+	unsigned int prio_wr;
+	unsigned int prio1;
+	unsigned int prio0;
 };
 
 struct path_node {
@@ -101,8 +116,14 @@ struct msm_bus_inode_info {
 	struct path_node *pnode;
 	int commit_index;
 	struct nodeclk nodeclk[NUM_CTX];
-	struct nodeclk memclk;
+	struct nodeclk memclk[NUM_CTX];
 	void *hw_data;
+};
+
+struct msm_bus_node_hw_info {
+	bool dirty;
+	unsigned int hw_id;
+	uint64_t bw;
 };
 
 struct msm_bus_hw_algorithm {
@@ -181,6 +202,8 @@ struct msm_bus_client {
 	int curr;
 };
 
+int msm_bus_remote_hw_commit(struct msm_bus_fabric_registration
+	*fab_pdata, void *hw_data, void **cdata);
 int msm_bus_fabric_device_register(struct msm_bus_fabric_device *fabric);
 void msm_bus_fabric_device_unregister(struct msm_bus_fabric_device *fabric);
 struct msm_bus_fabric_device *msm_bus_get_fabric_device(int fabid);

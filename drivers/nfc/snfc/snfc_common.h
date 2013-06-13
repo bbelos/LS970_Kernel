@@ -15,15 +15,29 @@
 #include <linux/delay.h>/*mdelay*/
 #include <linux/types.h>/* size_t */
 #include <linux/miscdevice.h>/*misc_register, misc_deregister*/
-
+#include <linux/module.h>
 /*
  *  Define
  */
 
 /* debug message */
-#define FEATURE_DEBUG_LOW
+//#define FEATURE_DEBUG_LOW
+#define FEATURE_DEBUG_MIDDLE
+
 #define SNFC_DEBUG_MSG printk
 //#define SNFC_DEBUG_MSG(ARGS,...)
+
+#ifdef FEATURE_DEBUG_LOW
+#define SNFC_DEBUG_MSG_LOW printk
+#else
+#define SNFC_DEBUG_MSG_LOW(...) ((void)0)
+#endif
+
+#ifdef FEATURE_DEBUG_MIDDLE
+#define SNFC_DEBUG_MSG_MIDDLE printk
+#else
+#define SNFC_DEBUG_MSG_MIDDLE(...) ((void)0)
+#endif
 
 #endif
 

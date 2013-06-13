@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/module.h>
 #include <linux/mii.h>
 #include <linux/if_arp.h>
 #include <linux/etherdevice.h>
@@ -18,8 +19,8 @@
 #include <linux/usb.h>
 #include <linux/usb/usbnet.h>
 #include <linux/msm_rmnet.h>
-#ifdef CONFIG_LGE_EMS_CH
-#include <mach/hsic_debug_ch.h>
+#ifdef CONFIG_USB_LGE_DDM_BRIDGE
+#include <mach/ddm_bridge.h>
 #endif
 #include "rmnet_usb_ctrl.h"
 
@@ -152,7 +153,7 @@ static int rmnet_usb_resume(struct usb_interface *iface)
 	retval = usbnet_resume(iface);
 	if (!retval) {
 		if (oldstate & PM_EVENT_SUSPEND)
-			retval = rmnet_usb_ctrl_start(dev);
+			retval = rmnet_usb_ctrl_start_rx(dev);
 	}
 fail:
 	return retval;
@@ -565,11 +566,14 @@ static int rmnet_usb_probe(struct usb_interface *iface,
 
 	udev = unet->udev;
 
-	/* allow modem to wake up suspended system */
-	device_set_wakeup_enable(&udev->dev, 1);
+	usb_enable_autosuspend(udev);
 
-	/* set default autosuspend timeout for modem and roothub */
 	if (udev->parent && !udev->parent->parent) {
+		/* allow modem and roothub to wake up suspended system */
+		device_set_wakeup_enable(&udev->dev, 1);
+		device_set_wakeup_enable(&udev->parent->dev, 1);
+
+		/* set default autosuspend timeout for modem and roothub */
 		pm_runtime_set_autosuspend_delay(&udev->dev, 1000);
 		pm_runtime_set_autosuspend_delay(&udev->parent->dev, 200);
 	}
@@ -606,8 +610,11 @@ static void rmnet_usb_disconnect(struct usb_interface *intf)
 
 /*bit position represents interface number*/
 #define PID9034_IFACE_MASK	0xF0
+#ifdef CONFIG_USB_LGE_DDM_BRIDGE
+#define PID9048_IFACE_MASK	0x1C0
+#else
 #define PID9048_IFACE_MASK	0x1E0
-/* Added for CSVT */
+#endif
 #define PID904C_IFACE_MASK	0x1C0
 
 static const struct driver_info rmnet_info_pid9034 = {

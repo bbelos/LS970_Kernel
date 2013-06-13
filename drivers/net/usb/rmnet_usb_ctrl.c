@@ -12,14 +12,15 @@
 
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/device.h>
 #include <linux/uaccess.h>
 #include <linux/termios.h>
 #include <linux/poll.h>
 #include <linux/ratelimit.h>
 #include <linux/debugfs.h>
-#ifdef CONFIG_LGE_EMS_CH
-#include <mach/hsic_debug_ch.h>
+#ifdef CONFIG_USB_LGE_DDM_BRIDGE
+#include <mach/ddm_bridge.h>
 #endif
 #include "rmnet_usb_ctrl.h"
 
@@ -163,7 +164,6 @@ static void notification_available_cb(struct urb *urb)
 	switch (ctrl->bNotificationType) {
 	case USB_CDC_NOTIFY_RESPONSE_AVAILABLE:
 		dev->resp_avail_cnt++;
-		usb_mark_last_busy(udev);
 		usb_fill_control_urb(dev->rcvurb, udev,
 					usb_rcvctrlpipe(udev, 0),
 					(unsigned char *)dev->in_ctlreq,
@@ -274,7 +274,7 @@ resubmit_int_urb:
 			__func__, status);
 }
 
-static int rmnet_usb_ctrl_start_rx(struct rmnet_ctrl_dev *dev)
+int rmnet_usb_ctrl_start_rx(struct rmnet_ctrl_dev *dev)
 {
 	int	retval = 0;
 
@@ -299,18 +299,6 @@ int rmnet_usb_ctrl_stop_rx(struct rmnet_ctrl_dev *dev)
 	usb_kill_urb(dev->inturb);
 
 	return 0;
-}
-
-int rmnet_usb_ctrl_start(struct rmnet_ctrl_dev *dev)
-{
-	int	status = 0;
-
-	mutex_lock(&dev->dev_lock);
-	if (dev->is_opened)
-		status = rmnet_usb_ctrl_start_rx(dev);
-	mutex_unlock(&dev->dev_lock);
-
-	return status;
 }
 
 static int rmnet_usb_ctrl_alloc_rx(struct rmnet_ctrl_dev *dev)
@@ -419,7 +407,7 @@ static int rmnet_usb_ctrl_write(struct rmnet_ctrl_dev *dev, char *buf,
 
 	result = usb_autopm_get_interface(dev->intf);
 	if (result < 0) {
-		dev_err(dev->devicep, "%s: Unable to resume interface: %d\n",
+		dev_dbg(dev->devicep, "%s: Unable to resume interface: %d\n",
 			__func__, result);
 
 		/*
@@ -469,8 +457,8 @@ static int rmnet_ctl_open(struct inode *inode, struct file *file)
 					msecs_to_jiffies(dev->mdm_wait_timeout *
 									1000));
 		if (retval == 0) {
-			dev_err(dev->devicep, "%s: Timeout opening %s\n",
-						__func__, dev->name);
+			dev_err(dev->devicep, "%s: Timeout opening %s %d\n",
+						__func__, dev->name, dev->intf->altsetting->desc.bInterfaceNumber);
 			return -ETIMEDOUT;
 		} else if (retval < 0) {
 			dev_err(dev->devicep, "%s: Error waiting for %s\n",
@@ -684,7 +672,7 @@ static int rmnet_ctrl_tiocmset(struct rmnet_ctrl_dev *dev, unsigned int set,
 
 	retval = usb_autopm_get_interface(dev->intf);
 	if (retval < 0) {
-		dev_err(dev->devicep, "%s: Unable to resume interface: %d\n",
+		dev_dbg(dev->devicep, "%s: Unable to resume interface: %d\n",
 			__func__, retval);
 		return retval;
 	}

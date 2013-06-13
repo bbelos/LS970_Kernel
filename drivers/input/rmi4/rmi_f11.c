@@ -1352,6 +1352,8 @@ static int rmi_f11_register_devices(struct rmi_function_container *fc)
 		set_bit(EV_SYN, input_dev->evbit);
 		set_bit(EV_KEY, input_dev->evbit);
 		set_bit(EV_ABS, input_dev->evbit);
+		//donguk.ki@lge.com
+		set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
 
 		f11_set_abs_params(fc, i);
 

@@ -180,7 +180,7 @@ static int input_handle_abs_event(struct input_dev *dev,
 		return INPUT_IGNORE_EVENT;
 	}
 
-	is_mt_event = code >= ABS_MT_FIRST && code <= ABS_MT_LAST;
+	is_mt_event = input_is_mt_value(code);
 
 	if (!is_mt_event) {
 		pold = &dev->absinfo[code].value;
@@ -1574,9 +1574,16 @@ void input_reset_device(struct input_dev *dev)
 		 * Keys that have been pressed at suspend time are unlikely
 		 * to be still pressed when we resume.
 		 */
-		spin_lock_irq(&dev->event_lock);
+/* LGE_CHANGE
+ * During Suspend & Resume Do not release keys for Power Long Key press.
+ * If some devices want to release pressed keys on Suspend,
+ * Add the routine on each devices.
+ * fred.cho@lge.com, 2012-03-19
+ */
+/*		spin_lock_irq(&dev->event_lock);
 		input_dev_release_keys(dev);
 		spin_unlock_irq(&dev->event_lock);
+ */
 	}
 
 	mutex_unlock(&dev->mutex);
@@ -1584,40 +1591,6 @@ void input_reset_device(struct input_dev *dev)
 EXPORT_SYMBOL(input_reset_device);
 
 #ifdef CONFIG_PM
-static void input_dev_release_except_pwrkey(struct input_dev *dev)
-{
-	int code;
-
-	if (is_event_supported(EV_KEY, dev->evbit, EV_MAX)) {
-		for (code = 0; code <= KEY_MAX; code++) {
-			if(code == KEY_POWER)
-				printk("suspend --> resume: power_key is not clear for power key long pressed\n");
-			else{
-				if (is_event_supported(code, dev->keybit, KEY_MAX) &&
-			    	__test_and_clear_bit(code, dev->key)) {
-						input_pass_event(dev, EV_KEY, code, 0);
-				}
-			}
-		}
-		input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
-	}
-}
-
-void input_reset_device_except_pwrkey(struct input_dev *dev)
-{
-	mutex_lock(&dev->mutex);
-
-	if (dev->users) {
-		input_dev_toggle(dev, true);
-
-		spin_lock_irq(&dev->event_lock);
-		input_dev_release_except_pwrkey(dev);
-		spin_unlock_irq(&dev->event_lock);
-	}
-
-	mutex_unlock(&dev->mutex);
-}
-EXPORT_SYMBOL(input_reset_device_except_pwrkey);
 static int input_dev_suspend(struct device *dev)
 {
 	struct input_dev *input_dev = to_input_dev(dev);
@@ -1636,8 +1609,8 @@ static int input_dev_resume(struct device *dev)
 {
 	struct input_dev *input_dev = to_input_dev(dev);
 
-	//input_reset_device(input_dev);
-	input_reset_device_except_pwrkey(input_dev);
+	input_reset_device(input_dev);
+
 	return 0;
 }
 
@@ -1658,7 +1631,7 @@ static struct device_type input_dev_type = {
 #endif
 };
 
-static char *input_devnode(struct device *dev, mode_t *mode)
+static char *input_devnode(struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "input/%s", dev_name(dev));
 }

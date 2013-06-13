@@ -21,32 +21,55 @@
 #include <linux/cpufreq.h>
 #include <linux/msm_tsens.h>
 #include <linux/msm_thermal.h>
+#include <linux/platform_device.h>
+#include <linux/of.h>
 #include <mach/cpufreq.h>
-
-
-#define DEF_TEMP_SENSOR      0
-#define DEF_THERMAL_CHECK_MS 1000
-#ifdef CONFIG_MACH_LGE //sync with thermald-8064.conf's temperature. actually 60'C is too low to degrate CPU freqency to 918MHz
-#define DEF_ALLOWED_MAX_HIGH 93 //later carefully tune it
-#else
-#define DEF_ALLOWED_MAX_HIGH 60
+#ifdef CONFIG_LGE_PM
+#include <mach/board_lge.h>
 #endif
-#define DEF_ALLOWED_MAX_FREQ 918000
+
+#ifdef CONFIG_LGE_PM
+#define DEF_ALLOWED_MAX_FREQ 1026000
+#endif
 
 static int enabled;
 static struct msm_thermal_data msm_thermal_info;
 static uint32_t limited_max_freq = MSM_CPUFREQ_NO_LIMIT;
 static struct delayed_work check_temp_work;
 
+static int limit_idx;
+static int limit_idx_low;
+static int limit_idx_high;
+static struct cpufreq_frequency_table *table;
+
+static int msm_thermal_get_freq_table(void)
+{
+	int ret = 0;
+	int i = 0;
+
+	table = cpufreq_frequency_get_table(0);
+	if (table == NULL) {
+		pr_debug("%s: error reading cpufreq table\n", __func__);
+		ret = -EINVAL;
+		goto fail;
+	}
+
+	while (table[i].frequency != CPUFREQ_TABLE_END)
+		i++;
+
+	limit_idx_low = 0;
+	limit_idx_high = limit_idx = i - 1;
+
+	BUG_ON(limit_idx_high <= 0 || limit_idx_high <= limit_idx_low);
+fail:
+	return ret;
+}
+
 static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 {
 	int ret = 0;
 
 	ret = msm_cpufreq_set_freq_limits(cpu, MSM_CPUFREQ_NO_LIMIT, max_freq);
-	if (ret)
-		return ret;
-
-	ret = cpufreq_update_policy(cpu);
 	if (ret)
 		return ret;
 
@@ -57,11 +80,14 @@ static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 	else
 		pr_info("msm_thermal: Max frequency reset for cpu%d\n", cpu);
 
+	ret = cpufreq_update_policy(cpu);
+
 	return ret;
 }
 
 static void check_temp(struct work_struct *work)
 {
+	static int limit_init;
 	struct tsens_device tsens_dev;
 	unsigned long temp = 0;
 	uint32_t max_freq = limited_max_freq;
@@ -76,12 +102,47 @@ static void check_temp(struct work_struct *work)
 		goto reschedule;
 	}
 
-	if (temp >= msm_thermal_info.limit_temp)
-		max_freq = msm_thermal_info.limit_freq;
-	else if (temp <
-		msm_thermal_info.limit_temp - msm_thermal_info.temp_hysteresis)
-		max_freq = MSM_CPUFREQ_NO_LIMIT;
+	if (!limit_init) {
+		ret = msm_thermal_get_freq_table();
+		if (ret)
+			goto reschedule;
+		else
+			limit_init = 1;
+	}
 
+	if (temp >= msm_thermal_info.limit_temp_degC
+#if defined(CONFIG_MACH_APQ8064_GK_KR)||defined(CONFIG_MACH_APQ8064_GKATT)||defined(CONFIG_MACH_APQ8064_GVDCM)
+		|| temp <= msm_thermal_info.limit_temp_degC_low
+#endif
+		) {
+		if (limit_idx == limit_idx_low)
+			goto reschedule;
+
+		limit_idx -= msm_thermal_info.freq_step;
+		if (limit_idx < limit_idx_low)
+			limit_idx = limit_idx_low;
+		max_freq = table[limit_idx].frequency;
+#ifdef CONFIG_LGE_PM
+		if(max_freq >= 1026000)
+			max_freq = DEF_ALLOWED_MAX_FREQ;
+		pr_info("msm_thermal: tsens_temp %ld\n", temp); 
+#endif
+	} else if ( (temp < msm_thermal_info.limit_temp_degC -
+		 msm_thermal_info.temp_hysteresis_degC)
+#if defined(CONFIG_MACH_APQ8064_GK_KR)||defined(CONFIG_MACH_APQ8064_GKATT)||defined(CONFIG_MACH_APQ8064_GVDCM)
+		 && (temp > msm_thermal_info.limit_temp_degC_low)
+#endif
+		) {
+		if (limit_idx == limit_idx_high)
+			goto reschedule;
+
+		limit_idx += msm_thermal_info.freq_step;
+		if (limit_idx >= limit_idx_high) {
+			limit_idx = limit_idx_high;
+			max_freq = MSM_CPUFREQ_NO_LIMIT;
+		} else
+			max_freq = table[limit_idx].frequency;
+	}
 	if (max_freq == limited_max_freq)
 		goto reschedule;
 
@@ -109,6 +170,13 @@ static void disable_msm_thermal(void)
 
 	if (limited_max_freq == MSM_CPUFREQ_NO_LIMIT)
 		return;
+
+#if defined(CONFIG_MACH_APQ8064_GK_KR)||defined(CONFIG_MACH_APQ8064_GKATT)||defined(CONFIG_MACH_APQ8064_GVDCM)
+	if (limited_max_freq == DEF_ALLOWED_MAX_FREQ) {
+		pr_info("msm_thermal: continue  max_freq = %d..\n", DEF_ALLOWED_MAX_FREQ);
+		return;
+	}
+#endif
 
 	for_each_possible_cpu(cpu) {
 		update_cpu_max_freq(cpu, MSM_CPUFREQ_NO_LIMIT);
@@ -138,17 +206,78 @@ static struct kernel_param_ops module_ops = {
 module_param_cb(enabled, &module_ops, &enabled, 0644);
 MODULE_PARM_DESC(enabled, "enforce thermal limit on cpu");
 
-int __init msm_thermal_init(struct msm_thermal_data *pdata)
+int __devinit msm_thermal_init(struct msm_thermal_data *pdata)
 {
 	int ret = 0;
 
 	BUG_ON(!pdata);
 	BUG_ON(pdata->sensor_id >= TSENS_MAX_SENSORS);
 	memcpy(&msm_thermal_info, pdata, sizeof(struct msm_thermal_data));
-
+	
 	enabled = 1;
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
 	schedule_delayed_work(&check_temp_work, 0);
 
 	return ret;
+}
+
+static int __devinit msm_thermal_dev_probe(struct platform_device *pdev)
+{
+	int ret = 0;
+	char *key = NULL;
+	struct device_node *node = pdev->dev.of_node;
+	struct msm_thermal_data data;
+
+	memset(&data, 0, sizeof(struct msm_thermal_data));
+	key = "qcom,sensor-id";
+	ret = of_property_read_u32(node, key, &data.sensor_id);
+	if (ret)
+		goto fail;
+	WARN_ON(data.sensor_id >= TSENS_MAX_SENSORS);
+
+	key = "qcom,poll-ms";
+	ret = of_property_read_u32(node, key, &data.poll_ms);
+	if (ret)
+		goto fail;
+
+	key = "qcom,limit-temp";
+	ret = of_property_read_u32(node, key, &data.limit_temp_degC);
+	if (ret)
+		goto fail;
+
+	key = "qcom,temp-hysteresis";
+	ret = of_property_read_u32(node, key, &data.temp_hysteresis_degC);
+	if (ret)
+		goto fail;
+
+	key = "qcom,freq-step";
+	ret = of_property_read_u32(node, key, &data.freq_step);
+
+fail:
+	if (ret)
+		pr_err("%s: Failed reading node=%s, key=%s\n",
+		       __func__, node->full_name, key);
+	else
+		ret = msm_thermal_init(&data);
+
+	return ret;
+}
+
+static struct of_device_id msm_thermal_match_table[] = {
+	{.compatible = "qcom,msm-thermal"},
+	{},
+};
+
+static struct platform_driver msm_thermal_device_driver = {
+	.probe = msm_thermal_dev_probe,
+	.driver = {
+		.name = "msm-thermal",
+		.owner = THIS_MODULE,
+		.of_match_table = msm_thermal_match_table,
+	},
+};
+
+int __init msm_thermal_device_init(void)
+{
+	return platform_driver_register(&msm_thermal_device_driver);
 }

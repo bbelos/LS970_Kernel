@@ -104,6 +104,7 @@ enum pm8xxx_adc_channels {
 #define PM8XXX_CHANNEL_MPP_SCALE1_IDX	20
 #define PM8XXX_CHANNEL_MPP_SCALE3_IDX	40
 
+#define PM8XXX_AMUX_MPP_1   0x1
 #define PM8XXX_AMUX_MPP_3	0x3
 #define PM8XXX_AMUX_MPP_4	0x4
 #define PM8XXX_AMUX_MPP_5	0x5
@@ -626,12 +627,6 @@ static inline uint32_t pm8xxx_adc_btm_end(void)
 static inline uint32_t pm8xxx_adc_btm_configure(
 		struct pm8xxx_adc_arb_btm_param *param)
 { return -ENXIO; }
-#endif
-
-#if 0//ndef PA_THERM
-#if !defined(CONFIG_MACH_APQ8064_J1D) && !defined(CONFIG_MACH_APQ8064_J1KD)
-int32_t pm8xxx_adc_unconfigure(void);
-#endif
 #endif
 
 #endif /* PM8XXX_ADC_H */

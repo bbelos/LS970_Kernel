@@ -156,10 +156,56 @@ MODULE_AUTHOR("Immersion Corporation");
 MODULE_DESCRIPTION("TouchSense Kernel Module");
 MODULE_LICENSE("GPL v2");
 
+/* LGE_CHANGED_START
+  * Vibrator on/off device file is added(vib_enable)
+  * 2012.11.11, sehwan.lee@lge.com
+  */ 
+static int val = 0;
+
+static ssize_t
+immersion_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	if (sscanf(buf, "%d", &val) != 1)
+		return -EINVAL;
+
+	if(val == 1) {
+		printk("immersion_enable_store() : vibrator enable\n");
+		vibrator_power_set(1);
+		vibratror_pwm_gpio_OnOFF(1);
+		vibrator_pwm_set(1, 80, GP_CLK_N_DEFAULT);
+		vibrator_ic_enable_set(1);
+
+		DbgRecorderReset((val));
+		DbgRecord((val,";------- TSPDRV_ENABLE_AMP ---------\n"));
+	}
+	else if (val == 0) {
+		printk("immersion_enable_store() : vibrator disable\n");
+		vibrator_ic_enable_set(0);
+		vibrator_pwm_set(0, 0, GP_CLK_N_DEFAULT);
+        vibratror_pwm_gpio_OnOFF(0);
+		vibrator_power_set(0);
+	}
+	
+	return count;
+}
+
+static ssize_t
+immersion_enable_show(struct device *dev, struct device_attribute *attr,   char *buf)
+{
+	return sprintf(buf, val?"immersion_enable\n":"immersion_disable\n");
+}
+
+static struct device_attribute immersion_device_attrs[] = {
+	__ATTR(vib_enable,  S_IRUGO | S_IWUSR, immersion_enable_show, immersion_enable_store),
+};
+
+/* LGE_CHANGED_END 2012.11.11, sehwan.lee@lge.com */
+
 int __init tspdrv_init(void)
 {
     int nRet, i;   /* initialized below */
-
+	int err;
+	
     DbgOut((KERN_INFO "tspdrv: init_module.\n"));
 
 #ifdef IMPLEMENT_AS_CHAR_DRIVER
@@ -189,6 +235,18 @@ int __init tspdrv_init(void)
     {
         DbgOut((KERN_ERR "tspdrv: platform_driver_register failed.\n"));
     }
+
+/* LGE_CHANGED_START
+  * Vibrator on/off device file is added(vib_enable)
+  * 2012.11.11, sehwan.lee@lge.com
+  */ 
+	for (i = 0; i < ARRAY_SIZE(immersion_device_attrs); i++) {
+			err = device_create_file(miscdev.this_device, &immersion_device_attrs[i]);
+			if (err)
+				return err;
+	}
+	
+/* LGE_CHANGED_END 2012.11.11, sehwan.lee@lge.com */
 
     DbgRecorderInit(());
 

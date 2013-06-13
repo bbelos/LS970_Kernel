@@ -135,18 +135,10 @@ void sysmon_hsic_debug_init(struct usb_device *udev_from_hs, struct usb_interfac
 #endif
 
 	hs_udev = udev_from_hs;
-	if(hs_udev == NULL){
-		pr_err("[%s]hs_udev is NULL! \n", __func__);
-		return;
-	}
-		
 	hs_ifc = ifc_from_hs;
-	if(hs_ifc == NULL){
-		pr_err("[%s]hs_ifc is NULL! \n", __func__);
-		return;
-	}
+	hs_in_epaddr = in_epaddr;	
 	
-	hs_in_epaddr = in_epaddr;
+	
 	emsData.hsic_suspend = 0;
 	emsData.in_busy_hsic_read = 0;
 
@@ -197,9 +189,6 @@ void sysmon_hsic_debug_disconnect(void)
 			printk("[%s]++\n",__func__);
 #endif
 
-	usb_kill_anchored_urbs(&submitted);
-	destroy_workqueue(emsData.hsic_debug_wq);
-
 	hs_udev = NULL;
 	hs_ifc = NULL;
 	hs_in_epaddr = 0;
@@ -209,8 +198,10 @@ void sysmon_hsic_debug_disconnect(void)
 	if ( emsData.read_buf != NULL)
 	{
 		kfree(emsData.read_buf);
-		emsData.read_buf = NULL;
+		emsData.read_buf = NULL;		
 	}
+
+	destroy_workqueue(emsData.hsic_debug_wq);
 
 #ifdef LG_FW_HSIC_EMS_DEBUG
 			printk("[%s]--\n",__func__);
@@ -345,12 +336,6 @@ sysmon_hsic_debug_read_complete_callback(void *buf, int size, int actual)
  ******************************************************************************/
 static void sysmon_hsic_debug_bridge_read_cb(struct urb *urb)
 {
-
-	if(hs_udev == NULL){
-		pr_err("[%s]hs_udev is NULL! \n", __func__);
-		return;
-	}
-	
 	dev_dbg(&hs_udev->dev, "%s: status:%d actual:%d\n", __func__,
 			urb->status, urb->actual_length);
 
@@ -387,17 +372,7 @@ int sysmon_hsic_debug_bridge_read(char *data, int size)
 	unsigned int		pipe;
 	int			ret;
 
-	if(hs_udev == NULL){
-		pr_err("[%s]hs_udev is NULL! \n", __func__);
-		return -EINVAL;
-	}
-
-	if(hs_ifc == NULL){
-		pr_err("[%s]hs_ifc is NULL! \n", __func__);
-		return -EINVAL;
-	}
-
-	dev_dbg(&hs_udev->dev, "%s:\n", __func__);
+	dev_dbg(&hs_udev->dev, "%s:\n", __func__);	
 
 #ifdef LG_FW_HSIC_EMS_DEBUG
 	printk("[%s]called! EMS_RD_BUF_SIZE buf size = %d\n",__func__,size);
@@ -519,7 +494,12 @@ static int __init hsic_debug_init(void)
 
 static void __exit hsic_debug_exit(void)
 {
-	pr_info("%s:\n", __func__);	
+	pr_info("%s:\n", __func__);
+
+	hs_udev = NULL;
+	hs_ifc = NULL;
+	hs_in_epaddr = 0;
+	usb_kill_anchored_urbs(&submitted);
 }
 
 module_init(hsic_debug_init);

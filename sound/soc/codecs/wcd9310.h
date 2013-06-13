@@ -176,6 +176,7 @@ struct tabla_mbhc_config {
 	unsigned int gpio;
 	unsigned int gpio_irq;
 	int gpio_level_insert;
+	bool detect_extn_cable;
 	/* swap_gnd_mic returns true if extern GND/MIC swap switch toggled */
 	bool (*swap_gnd_mic) (struct snd_soc_codec *);
 };
@@ -183,6 +184,9 @@ struct tabla_mbhc_config {
 extern int tabla_hs_detect(struct snd_soc_codec *codec,
 			   const struct tabla_mbhc_config *cfg);
 
+#ifdef CONFIG_SWITCH_MAX1462X
+extern void set_headset_mic_bias_l10(int on); //[AUDIO_BSP], 20121025, gyuhwa.park@lge.com PMIC L10 Control
+#endif
 #ifdef CONFIG_SWITCH_FSA8008
 /*
 * 2012-02-06, mint.choi@lge.com

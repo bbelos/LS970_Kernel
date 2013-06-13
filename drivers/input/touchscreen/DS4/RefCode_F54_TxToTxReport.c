@@ -47,7 +47,7 @@ unsigned char F54_TxToTxReport(void)
 #else   
    printk("\nBin #: 5		Name: Transmitter To Transmitter Short Test\n");
 #endif
-   for (i = 0; i < 30; i++)
+   for (i = 0; i < CFG_F54_TXCOUNT; i++)
 		ImageArray[i] = 1;
 
    // Set report mode to run Tx-to-Tx
@@ -72,7 +72,7 @@ unsigned char F54_TxToTxReport(void)
 
 	// One bit per transmitter channel
 	k = 0;		
-	for (i = 0; i < 32; i++)
+	for (i = 0; i < CFG_F54_TXCOUNT; i++)
 	{
 		 k = i / 8;
 		 shift = i % 8;
@@ -151,7 +151,7 @@ unsigned char F54_TxToTxReport(void)
 	{
 #ifdef F54_Porting
 		ret += sprintf(buf+ret, "Test Result: Pass\n");
-		//write_log(buf);
+		write_log(buf);
 #else	
 		printk("Test Result: Pass\n");
 #endif
@@ -161,7 +161,7 @@ unsigned char F54_TxToTxReport(void)
 	 {
 #ifdef F54_Porting
 		ret += sprintf(buf+ret, "Test Result: Fail\n");
-		//write_log(buf);
+		write_log(buf);
 #else	 
 		 printk("Test Result: Fail\n");
 #endif

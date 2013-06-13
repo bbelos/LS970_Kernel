@@ -465,6 +465,7 @@ static struct msm_sensor_output_info_t imx111_dimensions[] = {
 /* LGE_CHANGE_E, Camera Zero shutter lag patch, 2012.01.12 jungryoul.choi@lge.com */
 };
 
+#if 0 // Move to Userspace
 static struct msm_camera_csid_vc_cfg imx111_cid_cfg[] = {
 	{0, CSI_RAW10, CSI_DECODE_10BIT},
 	{1, CSI_EMBED_DATA, CSI_DECODE_8BIT},
@@ -496,12 +497,20 @@ static struct msm_camera_csi2_params *imx111_csi_params_array[] = {
 	&imx111_csi_params,
 /* LGE_CHANGE_E, Camera Zero shutter lag patch, 2012.01.12 jungryoul.choi@lge.com */
 };
+#endif
 
 static struct msm_sensor_output_reg_addr_t imx111_reg_addr = {
 	.x_output = 0x34C,
 	.y_output = 0x34E,
 	.line_length_pclk = 0x342,
 	.frame_length_lines = 0x340,
+};
+
+static enum msm_camera_vreg_name_t imx111_veg_seq[] = {
+	CAM_VANA,
+	CAM_VDIG,
+	CAM_VIO,
+	CAM_VAF,
 };
 
 static struct msm_sensor_id_info_t imx111_id_info = {
@@ -548,11 +557,10 @@ int32_t imx111_sensor_setting(struct msm_sensor_ctrl_t *s_ctrl,
 			int update_type, int res)
 {
 	int32_t rc = 0;
-
-	s_ctrl->func_tbl->sensor_stop_stream(s_ctrl);
-	msleep(30);
+	pr_err("[rafal47] %s: update: %d, res : %d : Change camera mode\n", __func__, update_type, res);
+//	s_ctrl->func_tbl->sensor_stop_stream(s_ctrl);
+//	msleep(30);
 	if (update_type == MSM_SENSOR_REG_INIT) {
-		s_ctrl->curr_csi_params = NULL;
 		msm_sensor_enable_debugfs(s_ctrl);
 		msm_sensor_write_init_settings(s_ctrl);
 	} else if (update_type == MSM_SENSOR_UPDATE_PERIODIC) {
@@ -565,30 +573,9 @@ int32_t imx111_sensor_setting(struct msm_sensor_ctrl_t *s_ctrl,
          printk("[tykim] %s: csi_lane_assign not setting\n", __func__); /* LGE_CHANGE, Camera Setting for ES2, 2012.04.03, soojung.lim@lge.com */
 		} else {
 			msm_sensor_write_res_settings(s_ctrl, res);
-			if (s_ctrl->curr_csi_params != s_ctrl->csi_params[res]) {
-				s_ctrl->curr_csi_params = s_ctrl->csi_params[res];
-				s_ctrl->curr_csi_params->csid_params.lane_assign =
-					s_ctrl->sensordata->sensor_platform_info->
-					csi_lane_params->csi_lane_assign;
-				s_ctrl->curr_csi_params->csiphy_params.lane_mask =
-					s_ctrl->sensordata->sensor_platform_info->
-					csi_lane_params->csi_lane_mask;
-				v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
-						NOTIFY_CSID_CFG,
-						&s_ctrl->curr_csi_params->csid_params);
-				mb();
-				v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
-						NOTIFY_CSIPHY_CFG,
-						&s_ctrl->curr_csi_params->csiphy_params);
-				mb();
-				msleep(20);
-			}
-
 			v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
 				NOTIFY_PCLK_CHANGE, &s_ctrl->msm_sensor_reg->
 				output_settings[res].op_pixel_clk);
-			s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
-			msleep(30);
 		}
 	}
 	printk("%s: X", __func__);
@@ -659,25 +646,11 @@ int32_t imx111_sensor_write_exp_gain1(struct msm_sensor_ctrl_t *s_ctrl,
 			imx111_comm_confs[2].size,
 			imx111_comm_confs[2].data_type);
 
-		if (s_ctrl->curr_csi_params !=
-			s_ctrl->csi_params[s_ctrl->curr_res]) {
-			s_ctrl->curr_csi_params =
-				s_ctrl->csi_params[s_ctrl->curr_res];
-			v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
-					NOTIFY_CSID_CFG,
-					&s_ctrl->curr_csi_params->csid_params);
-			mb();
-			v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
-					NOTIFY_CSIPHY_CFG,
-					&s_ctrl->curr_csi_params->csiphy_params);
-			mb();
-			msleep(20);
-		}
 
 		v4l2_subdev_notify(&s_ctrl->sensor_v4l2_subdev,
 			NOTIFY_PCLK_CHANGE, &s_ctrl->msm_sensor_reg->
 			output_settings[s_ctrl->curr_res].op_pixel_clk);
-		s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
+//		s_ctrl->func_tbl->sensor_start_stream(s_ctrl);
 	} else {
 		s_ctrl->func_tbl->sensor_group_hold_on(s_ctrl);
 		msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
@@ -944,18 +917,19 @@ static struct msm_sensor_ctrl_t imx111_s_ctrl = {
 	.msm_sensor_reg = &imx111_regs,
 	.sensor_i2c_client = &imx111_sensor_i2c_client,
 	.sensor_i2c_addr = 0x34,
+	.vreg_seq = imx111_veg_seq,
+	.num_vreg_seq = ARRAY_SIZE(imx111_veg_seq),
 	.sensor_output_reg_addr = &imx111_reg_addr,
 	.sensor_id_info = &imx111_id_info,
 	.sensor_exp_gain_info = &imx111_exp_gain_info,
 	.cam_mode = MSM_SENSOR_MODE_INVALID,
-	.csi_params = &imx111_csi_params_array[0],
+//	.csi_params = &imx111_csi_params_array[0],
 	.msm_sensor_mutex = &imx111_mut,
 	.sensor_i2c_driver = &imx111_i2c_driver,
 	.sensor_v4l2_subdev_info = imx111_subdev_info,
 	.sensor_v4l2_subdev_info_size = ARRAY_SIZE(imx111_subdev_info),
 	.sensor_v4l2_subdev_ops = &imx111_subdev_ops,
 	.func_tbl = &imx111_func_tbl,
-	.clk_rate = MSM_SENSOR_MCLK_24HZ, // ADD
 };
 
 module_init(msm_sensor_init_module);

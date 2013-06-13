@@ -13,11 +13,7 @@
 #ifndef _ARCH_ARM_MACH_MSM_MDM_PERIPHERAL_H
 #define _ARCH_ARM_MACH_MSM_MDM_PERIPHERAL_H_
 
-#include <linux/usb.h>
-
 extern void peripheral_connect(void);
 extern void peripheral_disconnect(void);
-
-extern void dbg_log_event(struct urb *urb, char * event,unsigned extra, char * event1, int extra1, char * event2, int extra2);
 
 #endif

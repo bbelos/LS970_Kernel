@@ -221,7 +221,7 @@ int sps_bam_enable(struct sps_bam *dev)
 				    IRQF_TRIGGER_HIGH, "sps", dev);
 
 		if (result) {
-			SPS_ERR("sps:Failed to register BAM 0x%x IRQ %d",
+			SPS_ERR("sps:Failed to enable BAM 0x%x IRQ %d",
 				BAM_ID(dev), dev->props.irq);
 			return SPS_ERROR;
 		}
@@ -254,7 +254,8 @@ int sps_bam_enable(struct sps_bam *dev)
 				  dev->props.ee,
 				  (u16) dev->props.summing_threshold,
 				  irq_mask,
-				  &dev->version, &num_pipes);
+				  &dev->version, &num_pipes,
+				  dev->props.options & SPS_BAM_NO_EXT_P_RST);
 	else
 		/* No, so just verify that it is enabled */
 		rc = bam_check(dev->base, &dev->version, &num_pipes);
@@ -401,7 +402,7 @@ int sps_bam_enable(struct sps_bam *dev)
 	}
 
 	dev->state |= BAM_STATE_ENABLED;
-	SPS_DBG2("sps:BAM 0x%x enabled: ver: %d, number of pipes: %d",
+	SPS_INFO("sps:BAM 0x%x enabled: ver:0x%x, number of pipes:%d",
 		BAM_ID(dev), dev->version, dev->props.num_pipes);
 	return 0;
 }
@@ -1368,8 +1369,8 @@ static void trigger_event(struct sps_bam *dev,
 	}
 
 	if (event_reg->callback) {
-		event_reg->callback(&sps_event->notify);
 		SPS_DBG("sps:trigger_event.using callback.");
+		event_reg->callback(&sps_event->notify);
 	}
 
 }

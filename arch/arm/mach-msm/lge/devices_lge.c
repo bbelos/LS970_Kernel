@@ -1,10 +1,25 @@
+/* Copyright (c) 2012, LGE Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/memory.h>
 
 #include <asm/setup.h>
 #include <asm/sizes.h>
+#include <asm/system_info.h>
+#include <asm/memory.h>
 #ifdef CONFIG_LGE_PM
 #include <linux/mfd/pm8xxx/pm8921.h>
 #include <linux/delay.h>
@@ -57,10 +72,7 @@ int lge_get_charger_logo_state(void)
 #endif
 
 #ifdef CONFIG_LGE_PM
-/* LGE_CHANGE
- * Implement cable detection
- * 2012-01-14, sangduck.kim@lge.com
- */
+/* Implement cable detection */
 struct chg_cable_info_table {
 	int threshhold;
 	acc_cable_type type;
@@ -86,6 +98,30 @@ static struct chg_cable_info_table pm8921_acc_cable_type_data[]={
 	{ADC_CABLE_910K,    CABLE_910K,     C_910K_TA_MA,       C_910K_USB_MA},
 	{ADC_CABLE_NONE,    CABLE_NONE,     C_NONE_TA_MA,       C_NONE_USB_MA},
 };
+
+//doosan.baek@lge.com 20121122 Adc value is changed for Rev A, B, C of GV DCM.
+#if defined(CONFIG_MACH_APQ8064_GVDCM)
+/* This table is only for gvdcm in Rev A, B, C */
+static int pm8921_acc_cable_adc_data_gvdcm[]={
+	ADC_NO_INIT_CABLE3,
+	ADC_CABLE_MHL_1K3,
+	ADC_CABLE_U_28P7K3,
+	ADC_CABLE_28P7K3,
+	ADC_CABLE_56K3,
+	ADC_CABLE_100K3,
+	ADC_CABLE_130K3,
+	ADC_CABLE_180K3,
+	ADC_CABLE_200K3,
+	ADC_CABLE_220K3,
+	ADC_CABLE_270K3,
+	ADC_CABLE_330K3,
+	ADC_CABLE_620K3,
+	ADC_CABLE_910K3,
+	ADC_CABLE_NONE3,
+};
+#endif
+//doosan.baek@lge.com 20121122 Adc value is changed for Rev A, B, C of GV DCM.
+
 #endif
 
 /* for board revision */
@@ -100,12 +136,13 @@ static int __init board_revno_setup(char *rev_info)
 	int i;
 
 	printk(KERN_INFO "BOARD : LGE input %s \n", rev_info);
-	for(i=0; i< HW_REV_MAX; i++)
+	for (i=0; i< HW_REV_MAX; i++) {
 		if( !strncmp(rev_info, rev_str[i], 6)) {
 			lge_bd_rev = (hw_rev_type) i;
 			system_rev = lge_bd_rev;
 			break;
 		}
+	}
 
 	printk(KERN_INFO "BOARD : LGE matched %s \n", rev_str[lge_bd_rev]);
 	return 1;
@@ -163,6 +200,14 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 	info->ta_ma = C_NO_INIT_TA_MA;
 	info->usb_ma = C_NO_INIT_USB_MA;
 
+//doosan.baek@lge.com 20121122 Adc value is changed for Rev A, B, C of GV DCM.
+#if defined(CONFIG_MACH_APQ8064_GVDCM)
+	if(lge_get_board_revno() <= HW_REV_C)
+		for(i = 0; i <= CABLE_NONE;i++)
+			pm8921_acc_cable_type_data[i].threshhold = pm8921_acc_cable_adc_data_gvdcm[i];
+#endif
+//doosan.baek@lge.com 20121122 Adc value is changed for Rev A, B, C of GV DCM.
+
 	/* assume: adc value must be existed in ascending order */
 	for (i = 0; i < table_size; i++) {
 			table = &pm8921_acc_cable_type_data[i];
@@ -213,20 +258,37 @@ void lge_pm_read_cable_info(void)
 #endif
 
 #ifdef CONFIG_LGE_PM_BATTERY_ID_CHECKER
-int lge_battery_info = BATT_UNKNOWN;
+int lge_battery_info = BATT_ID_UNKNOWN;
+
+bool is_lge_battery(void)
+{
+	if (lge_battery_info == BATT_ID_DS2704_N ||
+	    lge_battery_info == BATT_ID_DS2704_L ||
+	    lge_battery_info == BATT_ID_DS2704_C ||
+	    lge_battery_info == BATT_ID_ISL6296_N ||
+	    lge_battery_info == BATT_ID_ISL6296_L ||
+	    lge_battery_info == BATT_ID_ISL6296_C)
+		return true;
+	return false;
+}
+EXPORT_SYMBOL(is_lge_battery);
 
 static int __init battery_information_setup(char *batt_info)
 {
         if(!strcmp(batt_info, "ds2704_n"))
-                lge_battery_info = BATT_DS2704_N;
+                lge_battery_info = BATT_ID_DS2704_N;
         else if(!strcmp(batt_info, "ds2704_l"))
-                lge_battery_info = BATT_DS2704_L;
+                lge_battery_info = BATT_ID_DS2704_L;
         else if(!strcmp(batt_info, "isl6296_n"))
-                lge_battery_info = BATT_ISL6296_N;
+                lge_battery_info = BATT_ID_ISL6296_N;
         else if(!strcmp(batt_info, "isl6296_l"))
-                lge_battery_info = BATT_ISL6296_L;
+                lge_battery_info = BATT_ID_ISL6296_L;
+		else if(!strcmp(batt_info, "isl6296_c"))
+				lge_battery_info = BATT_ID_ISL6296_C;
+		else if(!strcmp(batt_info, "ds2704_c"))
+				lge_battery_info = BATT_ID_DS2704_C;
         else
-                lge_battery_info = BATT_UNKNOWN;
+                lge_battery_info = BATT_ID_UNKNOWN;
 
         printk(KERN_INFO "Battery : %s %d\n", batt_info, lge_battery_info);
 
@@ -234,6 +296,7 @@ static int __init battery_information_setup(char *batt_info)
 }
 __setup("lge.batt_info=", battery_information_setup);
 #endif
+
 #ifdef CONFIG_LGE_KCAL
 int g_kcal_r = 255;
 int g_kcal_g = 255;
@@ -382,6 +445,8 @@ static struct platform_device panic_handler_device = {
 	}
 };
 
+volatile resource_size_t lge_add_info;
+
 void __init lge_add_panic_handler_devices(void)
 {
 	struct resource* res = crash_log_resource;
@@ -390,8 +455,11 @@ void __init lge_add_panic_handler_devices(void)
 	res->start = bank->start + bank->size + LGE_RAM_CONSOLE_SIZE;
 	res->end = res->start + LGE_CRASH_LOG_SIZE - 1;
 
+	lge_add_info = res->start + LGE_CRASH_LOG_SIZE + (1024 * 2);
+
 	printk(KERN_INFO "CRASH LOG START ADDR : %X\n", res->start);
 	printk(KERN_INFO "CRASH LOG END ADDR   : %X\n", res->end);
+	printk(KERN_INFO "ADDITIONAL INFO ADDR : %X\n", lge_add_info);
 
 	platform_device_register(&panic_handler_device);
 }

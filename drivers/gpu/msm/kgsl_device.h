@@ -14,8 +14,7 @@
 #define __KGSL_DEVICE_H
 
 #include <linux/idr.h>
-#include <linux/wakelock.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 #include <linux/earlysuspend.h>
 
 #include "kgsl.h"
@@ -26,6 +25,7 @@
 
 #define KGSL_TIMEOUT_NONE       0
 #define KGSL_TIMEOUT_DEFAULT    0xFFFFFFFF
+#define KGSL_TIMEOUT_PART       2000 /* 2 sec */
 
 #define FIRST_TIMEOUT (HZ / 2)
 
@@ -67,7 +67,7 @@ struct kgsl_functable {
 		unsigned int offsetwords, unsigned int *value);
 	void (*regwrite) (struct kgsl_device *device,
 		unsigned int offsetwords, unsigned int value);
-	int (*idle) (struct kgsl_device *device, unsigned int timeout);
+	int (*idle) (struct kgsl_device *device);
 	unsigned int (*isidle) (struct kgsl_device *device);
 	int (*suspend_context) (struct kgsl_device *device);
 	int (*start) (struct kgsl_device *device, unsigned int init_ram);
@@ -110,6 +110,7 @@ struct kgsl_functable {
 	int (*setproperty) (struct kgsl_device *device,
 		enum kgsl_property_type type, void *value,
 		unsigned int sizebytes);
+	int (*postmortem_dump) (struct kgsl_device *device, int manual);
 };
 
 /* MH register values */
@@ -158,7 +159,6 @@ struct kgsl_device {
 	uint32_t state;
 	uint32_t requested_state;
 
-	unsigned int last_expired_ctxt_id;
 	unsigned int active_cnt;
 	struct completion suspend_gate;
 
@@ -191,13 +191,16 @@ struct kgsl_device {
 	int drv_log;
 	int mem_log;
 	int pwr_log;
-	struct wake_lock idle_wakelock;
 	struct kgsl_pwrscale pwrscale;
 	struct kobject pwrscale_kobj;
-	struct pm_qos_request_list pm_qos_req_dma;
+	struct pm_qos_request pm_qos_req_dma;
 	struct work_struct ts_expired_ws;
 	struct list_head events;
 	s64 on_time;
+
+	/* Postmortem Control switches */
+	int pm_regs_enabled;
+	int pm_ib_enabled;
 };
 
 void kgsl_timestamp_expired(struct work_struct *work);
@@ -217,8 +220,7 @@ void kgsl_timestamp_expired(struct work_struct *work);
 	.mutex = __MUTEX_INITIALIZER((_dev).mutex),\
 	.state = KGSL_STATE_INIT,\
 	.ver_major = DRIVER_VERSION_MAJOR,\
-	.ver_minor = DRIVER_VERSION_MINOR,\
-	.last_expired_ctxt_id = KGSL_CONTEXT_INVALID
+	.ver_minor = DRIVER_VERSION_MINOR
 
 struct kgsl_context {
 	struct kref refcount;
@@ -285,9 +287,9 @@ static inline void kgsl_regwrite(struct kgsl_device *device,
 	device->ftbl->regwrite(device, offsetwords, value);
 }
 
-static inline int kgsl_idle(struct kgsl_device *device, unsigned int timeout)
+static inline int kgsl_idle(struct kgsl_device *device)
 {
-	return device->ftbl->idle(device, timeout);
+	return device->ftbl->idle(device);
 }
 
 static inline unsigned int kgsl_gpuid(struct kgsl_device *device,

@@ -66,13 +66,17 @@ int mipi_hitachi_lcd_on(struct platform_device *pdev)
 
 	printk(KERN_INFO "%s: mipi hitachi lcd on started \n", __func__);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000);//HS mode
-	cnt = mipi_dsi_cmds_tx(mfd, &hitachi_tx_buf, mipi_hitachi_pdata->power_on_set_1,
+	cnt = mipi_dsi_cmds_tx(&hitachi_tx_buf, mipi_hitachi_pdata->power_on_set_1,
 			mipi_hitachi_pdata->power_on_set_size_1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);//LP mode
 	
 	if(local_mfd==NULL)
 		local_mfd = mfd;
 	printk(KERN_INFO "%s: mipi hitachi lcd on end \n", __func__);
+
+	if (cnt > 0)
+		cnt = 0;
+
 	return cnt;
 }
 
@@ -89,11 +93,15 @@ int mipi_hitachi_lcd_off(struct platform_device *pdev)
 
 	printk(KERN_INFO "%s: mipi hitachi lcd off started \n", __func__);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000);//HS mode
-	cnt = mipi_dsi_cmds_tx(mfd, &hitachi_tx_buf,
+	cnt = mipi_dsi_cmds_tx(&hitachi_tx_buf,
 			mipi_hitachi_pdata->power_off_set_1,
 			mipi_hitachi_pdata->power_off_set_size_1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);//LP mode
 	printk(KERN_INFO "%s: mipi hitachi lcd off end \n", __func__);
+
+	if (cnt > 0)
+		cnt = 0;
+
 	return cnt;
 }
 int mipi_hitachi_lcd_off_for_shutdown(void)
@@ -102,7 +110,7 @@ int mipi_hitachi_lcd_off_for_shutdown(void)
 
 	printk(KERN_INFO "%s: mipi hitachi lcd off started \n", __func__);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000);//HS mode
-	cnt = mipi_dsi_cmds_tx(local_mfd, &hitachi_tx_buf,
+	cnt = mipi_dsi_cmds_tx(&hitachi_tx_buf,
 		mipi_hitachi_pdata->power_off_set_1,
 		mipi_hitachi_pdata->power_off_set_size_1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);//LP mode
@@ -188,7 +196,7 @@ ssize_t read_reg(struct device *dev, struct device_attribute *attr, char *buf)
 			mutex_lock(&local_mfd->dma->ov_mutex);
 			MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000);
 			if(cmds_test.dtype == DTYPE_GEN_READ1)
-				mipi_dsi_cmds_tx(local_mfd, &hitachi_tx_buf, &cmds_macp_off,1);
+				mipi_dsi_cmds_tx(&hitachi_tx_buf, &cmds_macp_off,1);
 			dsi_ctrl = MIPI_INP(MIPI_DSI_BASE + 0x0000);
 			video_mode = dsi_ctrl & 0x02; /* VIDEO_MODE_EN */
 			if (video_mode) {
@@ -208,7 +216,7 @@ ssize_t read_reg(struct device *dev, struct device_attribute *attr, char *buf)
 			if (video_mode)
 				MIPI_OUTP(MIPI_DSI_BASE + 0x0000, dsi_ctrl); /* restore */
 			if(cmds_test.dtype == DTYPE_GEN_READ1)
-				mipi_dsi_cmds_tx(local_mfd, &hitachi_tx_buf, &cmds_macp_on,1);
+				mipi_dsi_cmds_tx(&hitachi_tx_buf, &cmds_macp_on,1);
 			MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);
 			mutex_unlock(&local_mfd->dma->ov_mutex);
 			if(reg_size <= 8)

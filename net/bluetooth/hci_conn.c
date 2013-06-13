@@ -23,7 +23,7 @@
 */
 
 /* Bluetooth HCI connection handling. */
-//#define DEBUG // temp teddy.ju block esco
+
 #include <linux/module.h>
 
 #include <linux/types.h>
@@ -46,18 +46,11 @@
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/l2cap.h>
 
-// +s LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
-#ifndef FALSE
-#define FALSE 0
-#define TRUE (!FALSE)
-#endif
-// +e LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
-
 struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
 				bdaddr_t *dst, __u8 sec_level, __u8 auth_type,
 				struct bt_le_params *le_params)
 {
-	struct hci_conn *le;
+	struct hci_conn *le, *le_wlist_conn;
 	struct hci_cp_le_create_conn cp;
 	struct adv_entry *entry;
 	struct link_key *key;
@@ -66,8 +59,21 @@ struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
 
 	le = hci_conn_hash_lookup_ba(hdev, LE_LINK, dst);
 	if (le) {
-		hci_conn_hold(le);
-		return le;
+		le_wlist_conn = hci_conn_hash_lookup_ba(hdev, LE_LINK,
+								BDADDR_ANY);
+		if (!le_wlist_conn) {
+			hci_conn_hold(le);
+			return le;
+		} else {
+			BT_DBG("remove wlist conn");
+			le->out = 1;
+			le->link_mode |= HCI_LM_MASTER;
+			le->sec_level = BT_SECURITY_LOW;
+			le->type = LE_LINK;
+			hci_proto_connect_cfm(le, 0);
+			hci_conn_del(le_wlist_conn);
+			return le;
+		}
 	}
 
 	key = hci_find_link_key_type(hdev, dst, KEY_TYPE_LTK);
@@ -114,8 +120,13 @@ struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
 		cp.conn_latency = cpu_to_le16(BT_LE_LATENCY_DEF);
 		le->conn_timeout = 5;
 	}
-	bacpy(&cp.peer_addr, &le->dst);
-	cp.peer_addr_type = le->dst_type;
+	if (!bacmp(&le->dst, BDADDR_ANY)) {
+		cp.filter_policy = 0x01;
+		le->conn_timeout = 0;
+	} else {
+		bacpy(&cp.peer_addr, &le->dst);
+		cp.peer_addr_type = le->dst_type;
+	}
 
 	hci_send_cmd(hdev, HCI_OP_LE_CREATE_CONN, sizeof(cp), &cp);
 
@@ -126,6 +137,80 @@ EXPORT_SYMBOL(hci_le_connect);
 static void hci_le_connect_cancel(struct hci_conn *conn)
 {
 	hci_send_cmd(conn->hdev, HCI_OP_LE_CREATE_CONN_CANCEL, 0, NULL);
+}
+
+void hci_le_cancel_create_connect(struct hci_dev *hdev, bdaddr_t *dst)
+{
+	struct hci_conn *le;
+
+	BT_DBG("%p", hdev);
+
+	le = hci_conn_hash_lookup_ba(hdev, LE_LINK, dst);
+	if (le) {
+		BT_DBG("send hci connect cancel");
+		hci_le_connect_cancel(le);
+		hci_conn_del(le);
+	}
+}
+EXPORT_SYMBOL(hci_le_cancel_create_connect);
+
+void hci_le_add_dev_white_list(struct hci_dev *hdev, bdaddr_t *dst)
+{
+	struct hci_cp_le_add_dev_white_list cp;
+	struct adv_entry *entry;
+	struct link_key *key;
+
+	BT_DBG("%p", hdev);
+
+	memset(&cp, 0, sizeof(cp));
+	bacpy(&cp.addr, dst);
+
+	key = hci_find_link_key_type(hdev, dst, KEY_TYPE_LTK);
+	if (!key) {
+		entry = hci_find_adv_entry(hdev, dst);
+		if (entry)
+			cp.addr_type = entry->bdaddr_type;
+		else
+			cp.addr_type = 0x00;
+	} else {
+		cp.addr_type = key->addr_type;
+	}
+
+	hci_send_cmd(hdev, HCI_OP_LE_ADD_DEV_WHITE_LIST, sizeof(cp), &cp);
+}
+EXPORT_SYMBOL(hci_le_add_dev_white_list);
+
+void hci_le_remove_dev_white_list(struct hci_dev *hdev, bdaddr_t *dst)
+{
+	struct hci_cp_le_remove_dev_white_list cp;
+	struct adv_entry *entry;
+	struct link_key *key;
+
+	BT_DBG("%p", hdev);
+
+	memset(&cp, 0, sizeof(cp));
+	bacpy(&cp.addr, dst);
+
+	key = hci_find_link_key_type(hdev, dst, KEY_TYPE_LTK);
+	if (!key) {
+		entry = hci_find_adv_entry(hdev, dst);
+		if (entry)
+			cp.addr_type = entry->bdaddr_type;
+		else
+			cp.addr_type = 0x00;
+	} else {
+		cp.addr_type = key->addr_type;
+	}
+
+	hci_send_cmd(hdev, HCI_OP_LE_REMOVE_DEV_WHITE_LIST, sizeof(cp), &cp);
+}
+EXPORT_SYMBOL(hci_le_remove_dev_white_list);
+
+static inline bool is_role_switch_possible(struct hci_dev *hdev)
+{
+	if (hci_conn_hash_lookup_state(hdev, ACL_LINK, BT_CONNECTED))
+		return false;
+	return true;
 }
 
 void hci_acl_connect(struct hci_conn *conn)
@@ -163,7 +248,8 @@ void hci_acl_connect(struct hci_conn *conn)
 	}
 
 	cp.pkt_type = cpu_to_le16(conn->pkt_type);
-	if (lmp_rswitch_capable(hdev) && !(hdev->link_mode & HCI_LM_MASTER))
+	if (lmp_rswitch_capable(hdev) && !(hdev->link_mode & HCI_LM_MASTER)
+		&& is_role_switch_possible(hdev))
 		cp.role_switch = 0x01;
 	else
 		cp.role_switch = 0x00;
@@ -203,6 +289,28 @@ void hci_acl_disconn(struct hci_conn *conn, __u8 reason)
 				sizeof(cp), &cp);
 	}
 }
+
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03 [s]
+//jasper disable_sniff
+static const __u8 hyundai_carkit_comp_id[] = {0xb2, 0x1e, 0x00};
+
+int hci_conn_change_link_policy(struct hci_conn *conn, __u8 lp)
+{
+	BT_DBG("change link policy %d cur_set %d",lp , 
+		test_bit(HCI_CONN_CHANGE_LP_DURING_CONNECTION,  &conn->pend));
+
+	if ((lp == 0 && !test_and_set_bit(HCI_CONN_CHANGE_LP_DURING_CONNECTION, &conn->pend)) ||
+		(lp !=0 && test_and_clear_bit(HCI_CONN_CHANGE_LP_DURING_CONNECTION, &conn->pend))) {
+		struct hci_cp_write_link_policy cp;
+		cp.handle = cpu_to_le16(conn->handle);
+		cp.policy = lp;
+		hci_send_cmd(conn->hdev, HCI_OP_WRITE_LINK_POLICY,
+							sizeof(cp), &cp);
+	}
+
+	return 0;
+}
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03 [e]
 
 void hci_add_sco(struct hci_conn *conn, __u16 handle)
 {
@@ -348,6 +456,11 @@ void hci_sco_setup(struct hci_conn *conn, __u8 status)
 		return;
 
 	if (!status) {
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03 [s]
+		BT_DBG("%s", batostr(&conn->dst));
+		if (!memcmp(&conn->dst.b[3],(void *)hyundai_carkit_comp_id, 3))
+			hci_conn_change_link_policy(conn, 0); //jasper disable_sniff
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03 [e]
 		if (lmp_esco_capable(conn->hdev))
 			hci_setup_sync(sco, conn->handle);
 		else
@@ -399,6 +512,7 @@ static void hci_conn_idle(unsigned long arg)
 	struct hci_conn *conn = (void *) arg;
 
 	BT_DBG("conn %p mode %d", conn, conn->mode);
+
 	hci_conn_enter_sniff_mode(conn);
 }
 
@@ -454,10 +568,8 @@ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type,
 
 	conn->power_save = 1;
 	conn->disc_timeout = HCI_DISCONN_TIMEOUT;
-// +s LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
-	conn->conn_valid = TRUE;
+	conn->conn_valid = true;
 	spin_lock_init(&conn->lock);
-// +e LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 	wake_lock_init(&conn->idle_lock, WAKE_LOCK_SUSPEND, "bt_idle");
 
 	switch (type) {
@@ -530,11 +642,9 @@ int hci_conn_del(struct hci_conn *conn)
 
 	BT_DBG("%s conn %p handle %d", hdev->name, conn, conn->handle);
 
-// +s LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 	spin_lock_bh(&conn->lock);
-	conn->conn_valid = FALSE; /* conn data is being released */
+	conn->conn_valid = false; /* conn data is being released */
 	spin_unlock_bh(&conn->lock);
-// +e LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 
 	/* Make sure no timers are running */
 	del_timer(&conn->idle_timer);
@@ -773,7 +883,18 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
 	if (type == ACL_LINK)
 		return acl;
 
+	/* type of connection already existing can be ESCO or SCO
+	 * so check for both types before creating new */
+
 	sco = hci_conn_hash_lookup_ba(hdev, type, dst);
+
+	if (!sco && type == ESCO_LINK) {
+		sco = hci_conn_hash_lookup_ba(hdev, SCO_LINK, dst);
+	} else if (!sco && type == SCO_LINK) {
+		/* this case can be practically not possible */
+		sco = hci_conn_hash_lookup_ba(hdev, ESCO_LINK, dst);
+	}
+
 	if (!sco) {
 		sco = hci_conn_add(hdev, type, pkt_type, dst);
 		if (!sco) {
@@ -790,12 +911,15 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
 	if (acl->state == BT_CONNECTED &&
 			(sco->state == BT_OPEN || sco->state == BT_CLOSED)) {
 		acl->power_save = 1;
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project		
 // +s LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO - teddy.ju
 		hci_conn_enter_active_mode_no_timer(acl);
 /* Google Original
 		hci_conn_enter_active_mode(acl, 1);
 */		
 // +e LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO - teddy.ju
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
+
 		if (test_bit(HCI_CONN_MODE_CHANGE_PEND, &acl->pend)) {
 			/* defer SCO setup until mode change completed */
 			set_bit(HCI_CONN_SCO_SETUP_PEND, &acl->pend);
@@ -987,6 +1111,7 @@ void hci_conn_enter_active_mode(struct hci_conn *conn, __u8 force_active)
 	}
 
 timer:
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 // +s LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO - teddy.ju
 	BT_DBG("sco_last_tx : %ld, sco_num : %d", hdev->sco_last_tx, hdev->conn_hash.sco_num);
 	if(hdev->conn_hash.sco_num && conn->mode!= HCI_CM_SNIFF){
@@ -995,20 +1120,18 @@ timer:
 		return;
 	}
 // +e LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO  - teddy.ju
-	
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 	if (hdev->idle_timeout > 0) {
-// +s LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 		spin_lock_bh(&conn->lock);
 		if (conn->conn_valid) {
 			mod_timer(&conn->idle_timer,
-			jiffies + msecs_to_jiffies(hdev->idle_timeout));
+				jiffies + msecs_to_jiffies(hdev->idle_timeout));
 			wake_lock(&conn->idle_lock);
 		}
 		spin_unlock_bh(&conn->lock);
-// +e LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 	}
 }
-
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 // +s LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO - teddy.ju
 void hci_conn_enter_active_mode_no_timer(struct hci_conn *conn)
 {
@@ -1030,6 +1153,7 @@ void hci_conn_enter_active_mode_no_timer(struct hci_conn *conn)
 	}
 }
 // +e LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO - teddy.ju
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 
 static inline void hci_conn_stop_rssi_timer(struct hci_conn *conn)
 {

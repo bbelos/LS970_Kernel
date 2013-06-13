@@ -91,10 +91,24 @@ static int msm_dai_q6_hdmi_hw_params(struct snd_pcm_substream *substream,
 	u32 channel_allocation = 0;
 	u32 level_shift  = 0; /* 0dB */
 	bool down_mix = FALSE;
+	int sample_rate = 48000;
 
 	dai_data->channels = params_channels(params);
 	dai_data->rate = params_rate(params);
 	dai_data->port_config.hdmi_multi_ch.reserved = 0;
+
+	switch (dai_data->rate) {
+	case 48000:
+		sample_rate = HDMI_SAMPLE_RATE_48KHZ;
+		break;
+	case 44100:
+		sample_rate = HDMI_SAMPLE_RATE_44_1KHZ;
+		break;
+	case 32000:
+		sample_rate = HDMI_SAMPLE_RATE_32KHZ;
+		break;
+	}
+	hdmi_msm_audio_sample_rate_reset(sample_rate);
 
 	switch (dai_data->channels) {
 	case 2:
@@ -107,6 +121,13 @@ static int msm_dai_q6_hdmi_hw_params(struct snd_pcm_substream *substream,
 	case 6:
 		channel_allocation  = 0x0B;
 		hdmi_msm_audio_info_setup(1, MSM_HDMI_AUDIO_CHANNEL_6,
+				channel_allocation, level_shift, down_mix);
+		dai_data->port_config.hdmi_multi_ch.channel_allocation =
+				channel_allocation;
+		break;
+	case 8:
+		channel_allocation  = 0x1F;
+		hdmi_msm_audio_info_setup(1, MSM_HDMI_AUDIO_CHANNEL_8,
 				channel_allocation, level_shift, down_mix);
 		dai_data->port_config.hdmi_multi_ch.channel_allocation =
 				channel_allocation;
@@ -158,52 +179,17 @@ static int msm_dai_q6_hdmi_prepare(struct snd_pcm_substream *substream,
 	int rc = 0;
 
 	if (!test_bit(STATUS_PORT_STARTED, dai_data->status_mask)) {
-		/* PORT START should be set if prepare called in active state */
-		rc = afe_q6_interface_prepare();
+		rc = afe_port_start(dai->id, &dai_data->port_config,
+				    dai_data->rate);
 		if (IS_ERR_VALUE(rc))
-			dev_err(dai->dev, "fail to open AFE APR\n");
+			dev_err(dai->dev, "fail to open AFE port %x\n",
+				dai->id);
+		else
+			set_bit(STATUS_PORT_STARTED,
+				dai_data->status_mask);
 	}
+
 	return rc;
-}
-
-static int msm_dai_q6_hdmi_trigger(struct snd_pcm_substream *substream, int cmd,
-		struct snd_soc_dai *dai)
-{
-	struct msm_dai_q6_hdmi_dai_data *dai_data = dev_get_drvdata(dai->dev);
-
-	/* Start/stop port without waiting for Q6 AFE response. Need to have
-	 * native q6 AFE driver propagates AFE response in order to handle
-	 * port start/stop command error properly if error does arise.
-	 */
-	pr_debug("%s:port:%d  cmd:%d dai_data->status_mask = %ld",
-		__func__, dai->id, cmd, *dai_data->status_mask);
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-	case SNDRV_PCM_TRIGGER_RESUME:
-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (!test_bit(STATUS_PORT_STARTED, dai_data->status_mask)) {
-			afe_port_start_nowait(dai->id, &dai_data->port_config,
-					dai_data->rate);
-
-			set_bit(STATUS_PORT_STARTED, dai_data->status_mask);
-		}
-		break;
-	case SNDRV_PCM_TRIGGER_STOP:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		if (test_bit(STATUS_PORT_STARTED, dai_data->status_mask)) {
-			afe_port_stop_nowait(dai->id);
-			clear_bit(STATUS_PORT_STARTED, dai_data->status_mask);
-		}
-		break;
-
-	default:
-		dev_err(dai->dev, "invalid Trigger command = %d\n", cmd);
-		return -EINVAL;
-	}
-
-	return 0;
 }
 
 static int msm_dai_q6_hdmi_dai_probe(struct snd_soc_dai *dai)
@@ -253,7 +239,6 @@ static int msm_dai_q6_hdmi_dai_remove(struct snd_soc_dai *dai)
 
 static struct snd_soc_dai_ops msm_dai_q6_hdmi_ops = {
 	.prepare	= msm_dai_q6_hdmi_prepare,
-	.trigger	= msm_dai_q6_hdmi_trigger,
 	.hw_params	= msm_dai_q6_hdmi_hw_params,
 	.shutdown	= msm_dai_q6_hdmi_shutdown,
 };

@@ -93,8 +93,8 @@ static struct gpio_event_matrix_info kp_matrix_info = {
 	.input_gpios	= kp_col_gpios,
 	.noutputs	= ARRAY_SIZE(kp_row_gpios),
 	.ninputs	= ARRAY_SIZE(kp_col_gpios),
-	.settle_time.tv_nsec = 40 * NSEC_PER_USEC,
-	.poll_time.tv_nsec = 20 * NSEC_PER_MSEC,
+	.settle_time.tv64 = 40 * NSEC_PER_USEC,
+	.poll_time.tv64 = 20 * NSEC_PER_MSEC,
 	.flags		= GPIOKPF_LEVEL_TRIGGERED_IRQ | GPIOKPF_DRIVE_INACTIVE |
 			  GPIOKPF_PRINT_UNMAPPED_KEYS,
 };
@@ -138,8 +138,8 @@ static struct gpio_event_matrix_info kp_matrix_info_8625 = {
 	.input_gpios    = kp_col_gpios_8625,
 	.noutputs       = ARRAY_SIZE(kp_row_gpios_8625),
 	.ninputs        = ARRAY_SIZE(kp_col_gpios_8625),
-	.settle_time.tv_nsec = 40 * NSEC_PER_USEC,
-	.poll_time.tv_nsec = 20 * NSEC_PER_MSEC,
+	.settle_time.tv64 = 40 * NSEC_PER_USEC,
+	.poll_time.tv64 = 20 * NSEC_PER_MSEC,
 	.flags          = GPIOKPF_LEVEL_TRIGGERED_IRQ | GPIOKPF_DRIVE_INACTIVE |
 			  GPIOKPF_PRINT_UNMAPPED_KEYS,
 };
@@ -204,7 +204,7 @@ struct kobject *mxt_virtual_key_properties_kobj;
 
 static int mxt_vkey_setup(void)
 {
-	int retval;
+	int retval = 0;
 
 	mxt_virtual_key_properties_kobj =
 		kobject_create_and_add("board_properties", NULL);
@@ -706,8 +706,8 @@ static struct gpio_event_matrix_info kp_matrix_info_sku3 = {
 	.input_gpios    = kp_col_gpios_sku3,
 	.noutputs       = ARRAY_SIZE(kp_row_gpios_sku3),
 	.ninputs        = ARRAY_SIZE(kp_col_gpios_sku3),
-	.settle_time.tv_nsec = 40 * NSEC_PER_USEC,
-	.poll_time.tv_nsec = 20 * NSEC_PER_MSEC,
+	.settle_time.tv64 = 40 * NSEC_PER_USEC,
+	.poll_time.tv64 = 20 * NSEC_PER_MSEC,
 	.flags          = GPIOKPF_LEVEL_TRIGGERED_IRQ | GPIOKPF_DRIVE_INACTIVE |
 				GPIOKPF_PRINT_UNMAPPED_KEYS,
 };

@@ -19,17 +19,17 @@ struct android_vibrator_platform_data {
 	int enable_status;
 	int amp;
 	int vibe_n_value;
-	int (*power_set)(int enable);           /* LDO Power Set Function */
-	int (*pwm_set)(int enable, int gain, int n_value);           /* PWM Set Function */
-	int (*ic_enable_set)(int enable);       /* Motor IC Set Function */
+	int (*power_set)(int enable); /* LDO Power Set Function */
+	int (*pwm_set)(int enable, int gain, int n_value); /* PWM Set Function */
+	int (*ic_enable_set)(int enable); /* Motor IC Set Function */
 	int (*vibrator_init)(void);
 };
 
 
 /* Debug Mask setting */
-#define VIBRATOR_DEBUG_PRINT   (1)
-#define VIBRATOR_ERROR_PRINT   (1)
-#define VIBRATOR_INFO_PRINT    (0)
+#define VIBRATOR_DEBUG_PRINT (1)
+#define VIBRATOR_ERROR_PRINT (1)
+#define VIBRATOR_INFO_PRINT  (0)
 
 #if (VIBRATOR_INFO_PRINT)
 #define INFO_MSG(fmt, args...) \

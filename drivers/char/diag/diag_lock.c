@@ -45,12 +45,20 @@ static int get_ftm_portlock_item(void)
             default:
                 pr_info("%s: portlock is not set\n", __func__);
 
+#ifdef CONFIG_LGE_USB_DIAG_DISABLE_ONLY_MDM
+                c = '0';
+#else
                 c = '1';
+#endif
                 sys_lseek(fd, offset, 0);
                 if (sys_write(fd, &c, 1) != 1)
                     pr_err("%s: sys_write error\n", __func__);
 
+#ifdef CONFIG_LGE_USB_DIAG_DISABLE_ONLY_MDM
+                enable = DIAG_DISABLE;
+#else
                 enable = DIAG_ENABLE;
+#endif
                 break;
         }
 

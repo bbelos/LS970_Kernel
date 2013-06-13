@@ -244,20 +244,20 @@ static int msm_hsic_enable_clocks(struct platform_device *pdev,
 		goto put_cal_clk;
 	}
 
-	clk_enable(mhsic->iface_clk);
-	clk_enable(mhsic->core_clk);
-	clk_enable(mhsic->phy_clk);
-	clk_enable(mhsic->alt_core_clk);
-	clk_enable(mhsic->cal_clk);
+	clk_prepare_enable(mhsic->iface_clk);
+	clk_prepare_enable(mhsic->core_clk);
+	clk_prepare_enable(mhsic->phy_clk);
+	clk_prepare_enable(mhsic->alt_core_clk);
+	clk_prepare_enable(mhsic->cal_clk);
 
 	return 0;
 
 put_clocks:
-	clk_disable(mhsic->iface_clk);
-	clk_disable(mhsic->core_clk);
-	clk_disable(mhsic->phy_clk);
-	clk_disable(mhsic->alt_core_clk);
-	clk_disable(mhsic->cal_clk);
+	clk_disable_unprepare(mhsic->iface_clk);
+	clk_disable_unprepare(mhsic->core_clk);
+	clk_disable_unprepare(mhsic->phy_clk);
+	clk_disable_unprepare(mhsic->alt_core_clk);
+	clk_disable_unprepare(mhsic->cal_clk);
 put_cal_clk:
 	clk_put(mhsic->cal_clk);
 put_alt_core_clk:
@@ -635,7 +635,7 @@ static int __devinit msm_hsic_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct msm_hsic_per *mhsic;
 	int ret = 0;
-	struct msm_hsic_peripheral_platform_data *pdata;
+	struct ci13xxx_platform_data *pdata;
 
 	dev_dbg(&pdev->dev, "msm-hsic probe\n");
 
@@ -654,7 +654,8 @@ static int __devinit msm_hsic_probe(struct platform_device *pdev)
 	the_mhsic = mhsic;
 	platform_set_drvdata(pdev, mhsic);
 	mhsic->dev = &pdev->dev;
-	mhsic->pdata = pdata;
+	mhsic->pdata =
+		(struct msm_hsic_peripheral_platform_data *)pdata->prv_data;
 
 	mhsic->irq = platform_get_irq(pdev, 0);
 	if (mhsic->irq < 0) {

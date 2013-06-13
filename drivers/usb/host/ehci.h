@@ -62,6 +62,12 @@ struct ehci_stats {
 
 #define	EHCI_MAX_ROOT_PORTS	15		/* see HCS_N_PORTS */
 
+enum ehci_rh_state {
+	EHCI_RH_HALTED,
+	EHCI_RH_SUSPENDED,
+	EHCI_RH_RUNNING
+};
+
 struct ehci_hcd {			/* one per controller */
 	/* glue to PCI and HCD framework */
 	struct ehci_caps __iomem *caps;
@@ -70,6 +76,7 @@ struct ehci_hcd {			/* one per controller */
 
 	__u32			hcs_params;	/* cached register copy */
 	spinlock_t		lock;
+	enum ehci_rh_state	rh_state;
 
 	/* async schedule support */
 	struct ehci_qh		*async;
@@ -88,6 +95,8 @@ struct ehci_hcd {			/* one per controller */
 	union ehci_shadow	*pshadow;	/* mirror hw periodic table */
 	int			next_uframe;	/* scan periodic, start here */
 	unsigned		periodic_sched;	/* periodic activity count */
+	unsigned		uframe_periodic_max; /* max periodic time per uframe */
+
 
 	/* list of itds & sitds completed while clock_frame was still active */
 	struct list_head	cached_itd_list;
@@ -108,6 +117,8 @@ struct ehci_hcd {			/* one per controller */
 			the change-suspend feature turned on */
 	unsigned long		suspended_ports;	/* which ports are
 			suspended */
+	unsigned long		resuming_ports;		/* which ports have
+			started to resume */
 
 	/* per-HC memory pools (could be per-bus, but ...) */
 	struct dma_pool		*qh_pool;	/* qh per active urb */
@@ -122,9 +133,10 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		random_frame;
 	unsigned long		next_statechange;
 	ktime_t			last_periodic_enable;
+	ktime_t			last_susp_resume;
 	u32			command;
 
-	unsigned		max_log2_irq_thresh;
+	unsigned		log2_irq_thresh;
 
 	/* SILICON QUIRKS */
 	unsigned		no_selective_suspend:1;
@@ -172,7 +184,7 @@ struct ehci_hcd {			/* one per controller */
 	/*
 	 * OTG controllers and transceivers need software interaction
 	 */
-	struct otg_transceiver	*transceiver;
+	struct usb_phy	*transceiver;
 };
 
 /* convert between an HCD pointer and the corresponding EHCI_HCD */
@@ -186,12 +198,9 @@ static inline struct usb_hcd *ehci_to_hcd (struct ehci_hcd *ehci)
 }
 
 
-void dbg_log_event(struct urb *urb, char * event, unsigned extra,
-	char * event1, int extra1, char * event2, int extra2);
 static inline void
 iaa_watchdog_start(struct ehci_hcd *ehci)
 {
-	dbg_log_event(NULL,"iaa_wd_start",0,"",0,"",0);
 	WARN_ON(timer_pending(&ehci->iaa_watchdog));
 	mod_timer(&ehci->iaa_watchdog,
 			jiffies + msecs_to_jiffies(EHCI_IAA_MSECS));
@@ -199,7 +208,6 @@ iaa_watchdog_start(struct ehci_hcd *ehci)
 
 static inline void iaa_watchdog_done(struct ehci_hcd *ehci)
 {
-	dbg_log_event(NULL,"iaa_wd_done",0,"",0,"",0);
 	del_timer(&ehci->iaa_watchdog);
 }
 

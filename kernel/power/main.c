@@ -8,14 +8,13 @@
  *
  */
 
+#include <linux/export.h>
 #include <linux/kobject.h>
 #include <linux/string.h>
 #include <linux/resume-trace.h>
 #include <linux/workqueue.h>
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #include <linux/hrtimer.h>
 
 #include "power.h"
@@ -51,8 +50,9 @@ EXPORT_SYMBOL_GPL(unregister_pm_notifier);
 
 int pm_notifier_call_chain(unsigned long val)
 {
-	return (blocking_notifier_call_chain(&pm_chain_head, val, NULL)
-			== NOTIFY_BAD) ? -EINVAL : 0;
+	int ret = blocking_notifier_call_chain(&pm_chain_head, val, NULL);
+
+	return notifier_to_errno(ret);
 }
 
 /* If set, devices may be suspended and resumed asynchronously. */
@@ -201,7 +201,7 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
 	p = memchr(buf, '\n', n);
 	len = p ? p - buf : n;
 
-	mutex_lock(&pm_mutex);
+	lock_system_sleep();
 
 	level = TEST_FIRST;
 	for (s = &pm_tests[level]; level <= TEST_MAX; s++, level++)
@@ -211,7 +211,7 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
 			break;
 		}
 
-	mutex_unlock(&pm_mutex);
+	unlock_system_sleep();
 
 	return error ? error : n;
 }
@@ -219,9 +219,6 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
 power_attr(pm_test);
 #endif /* CONFIG_PM_DEBUG */
 
-#endif /* CONFIG_PM_SLEEP */
-
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_DEBUG_FS
 static char *suspend_step_name(enum suspend_stat_step step)
 {
@@ -253,16 +250,20 @@ static int suspend_stats_show(struct seq_file *s, void *unused)
 	last_errno %= REC_FAILED_NUM;
 	last_step = suspend_stats.last_failed_step + REC_FAILED_NUM - 1;
 	last_step %= REC_FAILED_NUM;
-	seq_printf(s, "%s: %d\n%s: %d\n%s: %d\n%s: %d\n"
-			"%s: %d\n%s: %d\n%s: %d\n%s: %d\n",
+	seq_printf(s, "%s: %d\n%s: %d\n%s: %d\n%s: %d\n%s: %d\n"
+			"%s: %d\n%s: %d\n%s: %d\n%s: %d\n%s: %d\n",
 			"success", suspend_stats.success,
 			"fail", suspend_stats.fail,
 			"failed_freeze", suspend_stats.failed_freeze,
 			"failed_prepare", suspend_stats.failed_prepare,
 			"failed_suspend", suspend_stats.failed_suspend,
+			"failed_suspend_late",
+				suspend_stats.failed_suspend_late,
 			"failed_suspend_noirq",
 				suspend_stats.failed_suspend_noirq,
 			"failed_resume", suspend_stats.failed_resume,
+			"failed_resume_early",
+				suspend_stats.failed_resume_early,
 			"failed_resume_noirq",
 				suspend_stats.failed_resume_noirq);
 	seq_printf(s,	"failures:\n  last_failed_dev:\t%-s\n",
@@ -316,7 +317,9 @@ static int __init pm_debugfs_init(void)
 
 late_initcall(pm_debugfs_init);
 #endif /* CONFIG_DEBUG_FS */
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
+
+#endif /* CONFIG_PM_SLEEP */
+
 struct kobject *power_kobj;
 
 /**
@@ -372,31 +375,23 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	/* First, check if we are requested to hibernate */
 	if (len == 4 && !strncmp(buf, "disk", len)) {
 		error = hibernate();
-  goto Exit;
+		goto Exit;
 	}
 
 #ifdef CONFIG_SUSPEND
 	for (s = &pm_states[state]; state < PM_SUSPEND_MAX; s++, state++) {
-		if (*s && len == strlen(*s) && !strncmp(buf, *s, len))
-			break;
-	}
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
-	if (state < PM_SUSPEND_MAX && *s) {
+		if (*s && len == strlen(*s) && !strncmp(buf, *s, len)) {
 #ifdef CONFIG_EARLYSUSPEND
-		if (state == PM_SUSPEND_ON || valid_state(state)) {
-			error = 0;
-			request_suspend_state(state);
-		}
+			if (state == PM_SUSPEND_ON || valid_state(state)) {
+				error = 0;
+				request_suspend_state(state);
+				break;
+			}
 #else
-		error = enter_state(state);
-		if (error) {
-			suspend_stats.fail++;
-			dpm_save_failed_errno(error);
-		} else
-			suspend_stats.success++;
+			error = pm_suspend(state);
 #endif
+		}
 	}
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #endif
 
  Exit:
@@ -506,28 +501,6 @@ power_attr(wake_lock);
 power_attr(wake_unlock);
 #endif
 
-#ifdef CONFIG_LGE_LOG_SERVICE
-/* LGE_CHANGE: add lge log service for kernel utc time stamp
- * /sys/power/lge_logstart
- * 2012-06-23, tei.kim@lge.com */
-
-static ssize_t lge_logstart_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	printk("lge_logstart_show() invoked\n");
-	return 0;
-}
-
-static ssize_t lge_logstart_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t n)
-{
-	printk("lge_logstart_store() invoked\n");
-	return n;
-}
-
-power_attr(lge_logstart);
-#endif
-
 static struct attribute *g[] = {
 	&state_attr.attr,
 #ifdef CONFIG_PM_TRACE
@@ -546,11 +519,6 @@ static struct attribute *g[] = {
 	&wake_lock_attr.attr,
 	&wake_unlock_attr.attr,
 #endif
-#endif
-#ifdef CONFIG_LGE_LOG_SERVICE
-/* LGE_CHANGE: add lge log service for kernel utc time stamp
- * 2012-06-23, tei.kim@lge.com */
-    &lge_logstart_attr.attr,
 #endif
 	NULL,
 };
@@ -585,6 +553,7 @@ static int __init pm_init(void)
 	hrtimer_init(&tc_ev_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	tc_ev_timer.function = &tc_ev_stop;
 	tc_ev_processed = 1;
+
 
 	power_kobj = kobject_create_and_add("power", NULL);
 	if (!power_kobj)

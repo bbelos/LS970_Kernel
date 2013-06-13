@@ -543,7 +543,7 @@ static ssize_t diag_dbgfs_read_table(struct file *file, char __user *ubuf,
 	return ret;
 }
 
-#ifdef CONFIG_DIAG_HSIC_PIPE
+#ifdef CONFIG_DIAG_BRIDGE_CODE
 static ssize_t diag_dbgfs_read_hsic(struct file *file, char __user *ubuf,
 				    size_t count, loff_t *ppos)
 {
@@ -558,6 +558,7 @@ static ssize_t diag_dbgfs_read_hsic(struct file *file, char __user *ubuf,
 
 	ret = scnprintf(buf, DEBUG_BUF_SIZE,
 		"hsic ch: %d\n"
+		"hsic_inited: %d\n"
 		"hsic enabled: %d\n"
 		"hsic_opened: %d\n"
 		"hsic_suspend: %d\n"
@@ -575,6 +576,7 @@ static ssize_t diag_dbgfs_read_hsic(struct file *file, char __user *ubuf,
 		"diag_disconnect_work: %d\n"
 		"diag_usb_read_complete_work: %d\n",
 		driver->hsic_ch,
+		driver->hsic_inited,
 		driver->hsic_device_enabled,
 		driver->hsic_device_opened,
 		driver->hsic_suspend,
@@ -630,7 +632,7 @@ void diag_debugfs_init(void)
 	debugfs_create_file("work_pending", 0444, diag_dbgfs_dent, 0,
 		&diag_dbgfs_workpending_ops);
 
-#ifdef CONFIG_DIAG_HSIC_PIPE
+#ifdef CONFIG_DIAG_BRIDGE_CODE
 	debugfs_create_file("hsic", 0444, diag_dbgfs_dent, 0,
 		&diag_dbgfs_hsic_ops);
 #endif

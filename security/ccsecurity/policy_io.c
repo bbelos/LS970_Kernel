@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2005-2012  NTT DATA CORPORATION
  *
- * Version: 1.8.3+   2012/02/29
+ * Version: 1.8.3+   2012/05/05
  */
 
 #include "internal.h"
@@ -458,8 +458,6 @@ static int __init ccs_init_module(void);
 static int ccs_delete_domain(char *domainname);
 static int ccs_open(struct inode *inode, struct file *file);
 static int ccs_parse_policy(struct ccs_io_buffer *head, char *line);
-static int ccs_poll_log(struct file *file, poll_table *wait);
-static int ccs_poll_query(struct file *file, poll_table *wait);
 static int ccs_release(struct inode *inode, struct file *file);
 static int ccs_set_mode(char *name, const char *value,
 			struct ccs_profile *profile);
@@ -2416,7 +2414,7 @@ static void ccs_check_profile(void)
 	struct ccs_domain_info *domain;
 	const int idx = ccs_read_lock();
 	ccs_policy_loaded = true;
-	printk(KERN_INFO "CCSecurity: 1.8.3+   2012/02/29\n");
+	printk(KERN_INFO "CCSecurity: 1.8.3+   2012/05/05\n");
 	list_for_each_entry_srcu(domain, &ccs_domain_list, list, &ccs_ss) {
 		const u8 profile = domain->profile;
 		const struct ccs_policy_namespace *ns = domain->ns;
@@ -2862,14 +2860,8 @@ static int ccs_update_manager_entry(const char *manager,
 	int error = is_delete ? -ENOENT : -ENOMEM;
 	/* Forced zero clear for using memcmp() at ccs_update_policy(). */
 	memset(&param.e, 0, sizeof(param.e));
-	if (ccs_domain_def(manager)) {
-		if (!ccs_correct_domain(manager))
-			return -EINVAL;
-		e->is_domain = true;
-	} else {
-		if (!ccs_correct_path(manager))
-			return -EINVAL;
-	}
+	if (!ccs_correct_domain(manager) && !ccs_correct_word(manager))
+		return -EINVAL;
 	e->manager = ccs_get_name(manager);
 	if (e->manager) {
 		error = ccs_update_policy(sizeof(*e), &param);
@@ -2933,7 +2925,7 @@ static void ccs_read_manager(struct ccs_io_buffer *head)
 static bool ccs_manager(void)
 {
 	struct ccs_manager *ptr;
-	const char *exe;
+	struct ccs_path_info exe;
 	struct ccs_security *task = ccs_current_security();
 	const struct ccs_path_info *domainname
 		= ccs_current_domain()->domainname;
@@ -2942,21 +2934,22 @@ static bool ccs_manager(void)
 		return true;
 	if (task->ccs_flags & CCS_TASK_IS_MANAGER)
 		return true;
-	if (!ccs_manage_by_non_root && (current_uid() || current_euid()))
+	if (!ccs_manage_by_non_root &&
+	    (!uid_eq(current_uid(), GLOBAL_ROOT_UID) ||
+	     !uid_eq(current_euid(), GLOBAL_ROOT_UID)))
 		return false;
-	exe = ccs_get_exe();
+	exe.name = ccs_get_exe();
+	if (!exe.name)
+		return false;
+	ccs_fill_path_info(&exe);
 	list_for_each_entry_srcu(ptr, &ccs_kernel_namespace.
 				 policy_list[CCS_ID_MANAGER], head.list,
 				 &ccs_ss) {
 		if (ptr->head.is_deleted)
 			continue;
-		if (ptr->is_domain) {
-			if (ccs_pathcmp(domainname, ptr->manager))
-				continue;
-		} else {
-			if (!exe || strcmp(exe, ptr->manager->name))
-				continue;
-		}
+		if (ccs_pathcmp(domainname, ptr->manager) &&
+		    ccs_pathcmp(&exe, ptr->manager))
+			continue;
 		/* Set manager flag. */
 		task->ccs_flags |= CCS_TASK_IS_MANAGER;
 		found = true;
@@ -2967,11 +2960,12 @@ static bool ccs_manager(void)
 		const pid_t pid = current->pid;
 		if (ccs_last_pid != pid) {
 			printk(KERN_WARNING "%s ( %s ) is not permitted to "
-			       "update policies.\n", domainname->name, exe);
+			       "update policies.\n", domainname->name,
+			       exe.name);
 			ccs_last_pid = pid;
 		}
 	}
-	kfree(exe);
+	kfree(exe.name);
 	return found;
 }
 
@@ -4965,48 +4959,13 @@ static struct ccs_domain_info *ccs_find_domain_by_qid(unsigned int serial)
 	struct ccs_domain_info *domain = NULL;
 	spin_lock(&ccs_query_list_lock);
 	list_for_each_entry(ptr, &ccs_query_list, list) {
-		if (ptr->serial != serial || ptr->answer)
+		if (ptr->serial != serial)
 			continue;
 		domain = ptr->domain;
 		break;
 	}
 	spin_unlock(&ccs_query_list_lock);
 	return domain;
-}
-
-/**
- * ccs_poll_query - poll() for /proc/ccs/query.
- *
- * @file: Pointer to "struct file".
- * @wait: Pointer to "poll_table".
- *
- * Returns POLLIN | POLLRDNORM when ready to read, 0 otherwise.
- *
- * Waits for access requests which violated policy in enforcing mode.
- */
-static int ccs_poll_query(struct file *file, poll_table *wait)
-{
-	struct list_head *tmp;
-	bool found = false;
-	u8 i;
-	for (i = 0; i < 2; i++) {
-		spin_lock(&ccs_query_list_lock);
-		list_for_each(tmp, &ccs_query_list) {
-			struct ccs_query *ptr =
-				list_entry(tmp, typeof(*ptr), list);
-			if (ptr->answer)
-				continue;
-			found = true;
-			break;
-		}
-		spin_unlock(&ccs_query_list_lock);
-		if (found)
-			return POLLIN | POLLRDNORM;
-		if (i)
-			break;
-		poll_wait(file, &ccs_query_wait, wait);
-	}
-	return 0;
 }
 
 /**
@@ -5029,8 +4988,6 @@ static void ccs_read_query(struct ccs_io_buffer *head)
 	spin_lock(&ccs_query_list_lock);
 	list_for_each(tmp, &ccs_query_list) {
 		struct ccs_query *ptr = list_entry(tmp, typeof(*ptr), list);
-		if (ptr->answer)
-			continue;
 		if (pos++ != head->r.query_index)
 			continue;
 		len = ptr->query_len;
@@ -5048,8 +5005,6 @@ static void ccs_read_query(struct ccs_io_buffer *head)
 	spin_lock(&ccs_query_list_lock);
 	list_for_each(tmp, &ccs_query_list) {
 		struct ccs_query *ptr = list_entry(tmp, typeof(*ptr), list);
-		if (ptr->answer)
-			continue;
 		if (pos++ != head->r.query_index)
 			continue;
 		/*
@@ -5097,8 +5052,12 @@ static int ccs_write_answer(struct ccs_io_buffer *head)
 		struct ccs_query *ptr = list_entry(tmp, typeof(*ptr), list);
 		if (ptr->serial != serial)
 			continue;
-		if (!ptr->answer)
-			ptr->answer = (u8) answer;
+		ptr->answer = (u8) answer;
+		/* Remove from ccs_query_list. */
+		if (ptr->answer) {
+			list_del(&ptr->list);
+			INIT_LIST_HEAD(&ptr->list);
+		}
 		break;
 	}
 	spin_unlock(&ccs_query_list_lock);
@@ -5367,9 +5326,15 @@ static char *ccs_print_header(struct ccs_request_info *r)
 		       stamp.year, stamp.month, stamp.day, stamp.hour,
 		       stamp.min, stamp.sec, r->profile, ccs_mode[r->mode],
 		       ccs_yesno(r->granted), gpid, ccs_sys_getpid(),
-		       ccs_sys_getppid(), current_uid(), current_gid(),
-		       current_euid(), current_egid(), current_suid(),
-		       current_sgid(), current_fsuid(), current_fsgid(),
+		       ccs_sys_getppid(),
+		       from_kuid(&init_user_ns, current_uid()),
+		       from_kgid(&init_user_ns, current_gid()),
+		       from_kuid(&init_user_ns, current_euid()),
+		       from_kgid(&init_user_ns, current_egid()),
+		       from_kuid(&init_user_ns, current_suid()),
+		       from_kgid(&init_user_ns, current_sgid()),
+		       from_kuid(&init_user_ns, current_fsuid()),
+		       from_kgid(&init_user_ns, current_fsgid()),
 		       ccs_flags & CCS_TASK_IS_EXECUTE_HANDLER ? "" : "!");
 	if (!obj)
 		goto no_obj_info;
@@ -5390,16 +5355,20 @@ static char *ccs_print_header(struct ccs_request_info *r)
 			pos += snprintf(buffer + pos, ccs_buffer_len - 1 - pos,
 					" path%u.parent={ uid=%u gid=%u "
 					"ino=%lu perm=0%o }", (i >> 1) + 1,
-					stat->uid, stat->gid, (unsigned long)
-					stat->ino, stat->mode & S_IALLUGO);
+					from_kuid(&init_user_ns, stat->uid),
+					from_kgid(&init_user_ns, stat->gid),
+					(unsigned long) stat->ino,
+					stat->mode & S_IALLUGO);
 			continue;
 		}
 		pos += snprintf(buffer + pos, ccs_buffer_len - 1 - pos,
 				" path%u={ uid=%u gid=%u ino=%lu major=%u"
 				" minor=%u perm=0%o type=%s", (i >> 1) + 1,
-				stat->uid, stat->gid, (unsigned long)
-				stat->ino, MAJOR(dev), MINOR(dev),
-				mode & S_IALLUGO, ccs_filetype(mode));
+				from_kuid(&init_user_ns, stat->uid),
+				from_kgid(&init_user_ns, stat->gid),
+				(unsigned long) stat->ino, MAJOR(dev),
+				MINOR(dev), mode & S_IALLUGO,
+				ccs_filetype(mode));
 		if (S_ISCHR(mode) || S_ISBLK(mode)) {
 			dev = stat->rdev;
 			pos += snprintf(buffer + pos, ccs_buffer_len - 1 - pos,
@@ -5673,24 +5642,6 @@ static void ccs_read_log(struct ccs_io_buffer *head)
 		head->r.w[head->r.w_pos++] = head->read_buf;
 		kfree(ptr);
 	}
-}
-
-/**
- * ccs_poll_log - Wait for an audit log.
- *
- * @file: Pointer to "struct file".
- * @wait: Pointer to "poll_table".
- *
- * Returns POLLIN | POLLRDNORM when ready to read an audit log.
- */
-static int ccs_poll_log(struct file *file, poll_table *wait)
-{
-	if (ccs_log_count)
-		return POLLIN | POLLRDNORM;
-	poll_wait(file, &ccs_log_wait, wait);
-	if (ccs_log_count)
-		return POLLIN | POLLRDNORM;
-	return 0;
 }
 
 /**
@@ -6139,21 +6090,28 @@ static int ccs_release(struct inode *inode, struct file *file)
  * ccs_poll - poll() for /proc/ccs/ interface.
  *
  * @file: Pointer to "struct file".
- * @wait: Pointer to "poll_table".
+ * @wait: Pointer to "poll_table". Maybe NULL.
  *
- * Returns 0 on success, negative value otherwise.
+ * Returns POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM if ready to read/write,
+ * POLLOUT | POLLWRNORM otherwise.
  */
 static unsigned int ccs_poll(struct file *file, poll_table *wait)
 {
 	struct ccs_io_buffer *head = file->private_data;
-	switch (head->type) {
-	case CCS_AUDIT:
-		return ccs_poll_log(file, wait);
-	case CCS_QUERY:
-		return ccs_poll_query(file, wait);
-	default:
-		return -ENOSYS;
+	if (head->type == CCS_AUDIT) {
+		if (!ccs_memory_used[CCS_MEMORY_AUDIT]) {
+			poll_wait(file, &ccs_log_wait, wait);
+			if (!ccs_memory_used[CCS_MEMORY_AUDIT])
+				return POLLOUT | POLLWRNORM;
+		}
+	} else if (head->type == CCS_QUERY) {
+		if (list_empty(&ccs_query_list)) {
+			poll_wait(file, &ccs_query_wait, wait);
+			if (list_empty(&ccs_query_list))
+				return POLLOUT | POLLWRNORM;
+		}
 	}
+	return POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM;
 }
 
 /**
@@ -6408,7 +6366,7 @@ static void __init ccs_create_entry(const char *name, const umode_t mode,
 /**
  * ccs_proc_init - Initialize /proc/ccs/ interface.
  *
- * Returns 0.
+ * Returns nothing.
  */
 static void __init ccs_proc_init(void)
 {

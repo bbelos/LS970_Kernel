@@ -3,26 +3,26 @@
 ** File:
 **     ImmVibeSPI.c
 **
-** Description: 
+** Description:
 **     Device-dependent functions called by Immersion TSP API
 **     to control PWM duty cycle, amp enable/disable, save IVT file, etc...
 **
-** Portions Copyright (c) 2008-2010 Immersion Corporation. All Rights Reserved. 
+** Portions Copyright (c) 2008-2010 Immersion Corporation. All Rights Reserved.
 **
-** This file contains Original Code and/or Modifications of Original Code 
-** as defined in and that are subject to the GNU Public License v2 - 
-** (the 'License'). You may not use this file except in compliance with the 
-** License. You should have received a copy of the GNU General Public License 
+** This file contains Original Code and/or Modifications of Original Code
+** as defined in and that are subject to the GNU Public License v2 -
+** (the 'License'). You may not use this file except in compliance with the
+** License. You should have received a copy of the GNU General Public License
 ** along with this program; if not, write to the Free Software Foundation, Inc.,
-** 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or contact 
+** 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or contact
 ** TouchSenseSales@immersion.com.
 **
-** The Original Code and all software distributed under the License are 
-** distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
-** EXPRESS OR IMPLIED, AND IMMERSION HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
-** INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, FITNESS 
-** FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. Please see 
-** the License for the specific language governing rights and limitations 
+** The Original Code and all software distributed under the License are
+** distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+** EXPRESS OR IMPLIED, AND IMMERSION HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+** INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, FITNESS
+** FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. Please see
+** the License for the specific language governing rights and limitations
 ** under the License.
 ** =========================================================================
 */
@@ -30,13 +30,16 @@
 #include <linux/io.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
-#include <linux/regulator/gpio-regulator.h>
+#include <linux/regulator/msm-gpio-regulator.h>
 
 #include <mach/irqs.h>
 #include <mach/gpiomux.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_xo.h>
 
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [START]
+//#define EANBLE_LOG_VIB
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [END]
 #ifdef IMMVIBESPIAPI
 #undef IMMVIBESPIAPI
 #endif
@@ -104,41 +107,41 @@ static struct msm_gpiomux_config gpio2_vibrator_configs[] = {
 	},
 };
 
-static struct msm_xo_voter *vib_clock; 
-static int vibrator_clock_init(void) 
-{ 
-    int rc; 
-    /*Vote for XO clock*/ 
-    vib_clock = msm_xo_get(MSM_XO_TCXO_D0, "vib_clock"); 
+static struct msm_xo_voter *vib_clock;
+static int vibrator_clock_init(void)
+{
+    int rc;
+    /*Vote for XO clock*/
+    vib_clock = msm_xo_get(MSM_XO_TCXO_D0, "vib_clock");
 
-    if (IS_ERR(vib_clock)) { 
-        rc = PTR_ERR(vib_clock); 
-        printk(KERN_ERR "%s: Couldn't get TCXO_D0 vote for Vib(%d)\n", 
-                __func__, rc); 
-    } 
-    return rc; 
-} 
+    if (IS_ERR(vib_clock)) {
+        rc = PTR_ERR(vib_clock);
+        printk(KERN_ERR "%s: Couldn't get TCXO_D0 vote for Vib(%d)\n",
+                __func__, rc);
+    }
+    return rc;
+}
 
-static int vibrator_clock_on(void) 
-{ 
-    int rc; 
-    rc = msm_xo_mode_vote(vib_clock, MSM_XO_MODE_ON); 
-    if (rc < 0) { 
-        printk(KERN_ERR "%s: Failed to vote for TCX0_D0 ON (%d)\n", 
-                __func__, rc); 
-    } 
-    return rc; 
-} 
+static int vibrator_clock_on(void)
+{
+    int rc;
+    rc = msm_xo_mode_vote(vib_clock, MSM_XO_MODE_ON);
+    if (rc < 0) {
+        printk(KERN_ERR "%s: Failed to vote for TCX0_D0 ON (%d)\n",
+                __func__, rc);
+    }
+    return rc;
+}
 
-static int vibrator_clock_off(void) 
-{ 
-    int rc; 
-    rc = msm_xo_mode_vote(vib_clock, MSM_XO_MODE_OFF); 
-    if (rc < 0) { 
-        printk(KERN_ERR "%s: Failed to vote for TCX0_D0 OFF (%d)\n", 
-                __func__, rc); 
-    } 
-    return rc; 
+static int vibrator_clock_off(void)
+{
+    int rc;
+    rc = msm_xo_mode_vote(vib_clock, MSM_XO_MODE_OFF);
+    if (rc < 0) {
+        printk(KERN_ERR "%s: Failed to vote for TCX0_D0 OFF (%d)\n",
+                __func__, rc);
+    }
+    return rc;
 }
 
 static int vibratror_pwm_gpio_OnOFF(int OnOFF)
@@ -146,17 +149,27 @@ static int vibratror_pwm_gpio_OnOFF(int OnOFF)
     int rc = 0;
     int gpio_motor_pwm = 0;
     gpio_motor_pwm = GPIO_LIN_MOTOR_PWM;
-    
+
     if (OnOFF) {
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [START]
+#ifdef EANBLE_LOG_VIB
         printk("%s: configuration to pwm \n", __func__);
+#endif	// #ifdef EANBLE_LOG_VIB
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [END]
         rc = gpio_request(gpio_motor_pwm, "lin_motor_pwm");
         if (rc) {
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [START]
+#ifdef EANBLE_LOG_VIB
             printk("%s: Failed to get attn gpio %d. rc: %d.\n",
                     __func__, gpio_motor_pwm, rc);
+#endif	// #ifdef EANBLE_LOG_VIB
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [END]
             return rc;
         }
     }else {
+#ifdef EANBLE_LOG_VIB    
         printk("%s: configuration to gpio \n", __func__);
+#endif	// #ifdef EANBLE_LOG_VIB
         gpio_free(gpio_motor_pwm);
     }
     return 0;
@@ -167,17 +180,17 @@ static int vibrator_power_set(int enable)
 	int rc = 0;
 	static struct regulator *vreg_l16 = NULL;
 	int enabled = 0;
-	
+
 	if (unlikely(!vreg_l16)) {
 		vreg_l16 = regulator_get(NULL, "8921_l16"); /* 2.6 ~ 3V */
-	
+
 		if (IS_ERR(vreg_l16)) {
 			pr_err("%s: regulator get of 8921_lvs6 failed (%ld)\n", __func__, PTR_ERR(vreg_l16));
 			rc = PTR_ERR(vreg_l16);
-			return rc; 
+			return rc;
 		}
 	}
-	
+
 	/* fix the unbalanced disables */
 	enabled = regulator_is_enabled(vreg_l16);
 	if (enabled > 0) {
@@ -189,7 +202,7 @@ static int vibrator_power_set(int enable)
 		if (enable == 0) { /* already disabled */
 			printk("vibrator already disabled\n");
 			return 0;
-		}  
+		}
 	} else { /*  (enabled < 0) */
 		pr_warn("%s: regulator_is_enabled failed\n", __func__);
 	}
@@ -199,12 +212,20 @@ static int vibrator_power_set(int enable)
 
 	if(enable)
 	{
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [START]
+#if 1 //def EANBLE_LOG_VIB
 		printk("vibrator_power_set() : vibrator enable\n");
+#endif	// #ifdef EANBLE_LOG_VIB
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [END]
 		rc = regulator_enable(vreg_l16);
 	}
 	else
 	{
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [START]
+#if 1 //def EANBLE_LOG_VIB
 		printk("vibrator_power_set() : vibrator disable\n");
+#endif	// #ifdef EANBLE_LOG_VIB
+//[AUDIO_BSP][Vibrator] gooyeon.jung@lge.com 2012-10-24 disable log [END]
 		rc = regulator_disable(vreg_l16);
 	}
 
@@ -218,7 +239,7 @@ static void vibrator_pwm_set(int enable, int amp, int n_value)
 	uint D_INV	= 0; /* QCT support invert bit for msm8960 */
 
 	if (enable)
-	{	
+	{
         vibrator_clock_on();
 
 		D_VAL = (((GP_CLK_D_MAX -1) * amp) >> 8) + GP_CLK_D_HALF;
@@ -229,11 +250,11 @@ static void vibrator_pwm_set(int enable, int amp, int n_value)
 			{      /* Max duty is 99% */
 				D_VAL = 2;
 			}
-			else 
+			else
 			{
 				D_VAL = GP_CLK_D_MAX - D_VAL;
 			}
-			
+
 			D_INV = 1;
 		}
 
@@ -241,9 +262,9 @@ static void vibrator_pwm_set(int enable, int amp, int n_value)
 			(((M_VAL & 0xffU) << 16U) + 	/* M_VAL[23:16] */
 			((~(D_VAL << 1)) & 0xffU)),		/* D_VAL[7:0] */
 			GPn_MD_REG(GP_CLK_ID));
-			
+
 		REG_WRITEL(
-			((((~(n_value-M_VAL)) & 0xffU) << 16U) + /* N_VAL[23:16] */			
+			((((~(n_value-M_VAL)) & 0xffU) << 16U) + /* N_VAL[23:16] */
 			(1U << 11U) +  				/* CLK_ROOT_ENA[11]		: Enable(1) */
 			((D_INV & 0x01U) << 10U) +	/* CLK_INV[10]			: Disable(0) */
 			(1U << 9U) +				/* CLK_BRANCH_ENA[9]	: Enable(1) */
@@ -252,13 +273,13 @@ static void vibrator_pwm_set(int enable, int amp, int n_value)
 			(2U << 5U) +				/* MNCNTR_MODE[6:5]		: Dual-edge mode(2) */
 			(3U << 3U) +				/* PRE_DIV_SEL[4:3]		: Div-4 (3) */
 			(5U << 0U)), 				/* SRC_SEL[2:0]			: CXO (5) */
-			GPn_NS_REG(GP_CLK_ID));		
+			GPn_NS_REG(GP_CLK_ID));
 	}
 	else
 	{
         vibrator_clock_off();
 		REG_WRITEL(
-			((((~(n_value-M_VAL)) & 0xffU) << 16U) + /* N_VAL[23:16] */			
+			((((~(n_value-M_VAL)) & 0xffU) << 16U) + /* N_VAL[23:16] */
 			(0U << 11U) +	/* CLK_ROOT_ENA[11]		: Disable(0) */
 			(0U << 10U) +	/* CLK_INV[10]			: Disable(0) */
 			(0U << 9U) +	/* CLK_BRANCH_ENA[9]	: Disable(0) */
@@ -268,7 +289,7 @@ static void vibrator_pwm_set(int enable, int amp, int n_value)
 			(3U << 3U) +	/* PRE_DIV_SEL[4:3]		: Div-4 (3) */
 			(5U << 0U)),	/* SRC_SEL[2:0]			: CXO (5) */
 			GPn_NS_REG(GP_CLK_ID));
-        
+
     }
 }
 
@@ -320,7 +341,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_AmpEnable(VibeUInt8 nActuatorIndex)
         vibratror_pwm_gpio_OnOFF(1);
 		vibrator_pwm_set(1, 0, GP_CLK_N_DEFAULT);
 		vibrator_ic_enable_set(1);
-    }	
+    }
     else
     {
         DbgOut((KERN_DEBUG "[ImmVibeSPI] : ImmVibeSPI_ForceOut_AmpEnable [%d]\n", g_bAmpEnabled ));
@@ -342,7 +363,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_Initialize(void)
 
     g_bAmpEnabled = true;   /* to force ImmVibeSPI_ForceOut_AmpDisable disabling the amp */
 
-    /* 
+    /*
     ** Disable amp.
     ** If multiple actuators are supported, please make sure to call
     ** ImmVibeSPI_ForceOut_AmpDisable for each actuator (provide the actuator index as
@@ -367,10 +388,10 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_Initialize(void)
 
 	/* gpio init */
 	rc = gpio_request(gpio_motor_pwm, "lin_motor_pwm");
-	
+
 	if (unlikely(rc < 0))
 		DbgOut(("not able to get gpio\n"));
-    
+
     vibrator_clock_init();
 
 	ImmVibeSPI_ForceOut_AmpDisable(0);
@@ -386,7 +407,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_Terminate(void)
 
     DbgOut((KERN_DEBUG "ImmVibeSPI_ForceOut_Terminate.\n"));
 
-    /* 
+    /*
     ** Disable amp.
     ** If multiple actuators are supported, please make sure to call
     ** ImmVibeSPI_ForceOut_AmpDisable for each actuator (provide the actuator index as
@@ -436,7 +457,7 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_SetSamples(VibeUInt8 nActuatorIndex
     }
     /* Check the Force value with Max and Min force value */
 
-	if (nForce > 127) 
+	if (nForce > 127)
 		nForce = 127;
 	if (nForce < -127)
 		nForce = -127;

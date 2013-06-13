@@ -15,11 +15,11 @@
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
+#include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <asm/mach/mmc.h>
 #include <mach/msm_bus_board.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/gpiomux.h>
 #include <mach/socinfo.h>
 #include "devices.h"
@@ -241,7 +241,6 @@ static struct mmc_platform_data msm8960_sdc1_data = {
 #endif
 	.sup_clk_table	= sdc1_sup_clk_rates,
 	.sup_clk_cnt	= ARRAY_SIZE(sdc1_sup_clk_rates),
-	.pclk_src_dfab	= 1,
 	.nonremovable	= 1,
 	.vreg_data	= &mmc_slot_vreg_data[SDCC1],
 	.pin_data	= &mmc_slot_pin_data[SDCC1],
@@ -257,19 +256,17 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
 	.sup_clk_table	= sdc3_sup_clk_rates,
 	.sup_clk_cnt	= ARRAY_SIZE(sdc3_sup_clk_rates),
-	.pclk_src_dfab	= 1,
 #ifdef CONFIG_MMC_MSM_SDC3_WP_SUPPORT
 /*TODO: Insert right replacement for PM8038 */
 #ifndef MSM8930_PHASE_2
 	.wpswitch_gpio	= PM8921_GPIO_PM_TO_SYS(16),
 #else
 	.wpswitch_gpio	= 66,
-	.wpswitch_polarity = 1,
+	.is_wpswitch_active_low = true,
 #endif
 #endif
 	.vreg_data	= &mmc_slot_vreg_data[SDCC3],
 	.pin_data	= &mmc_slot_pin_data[SDCC3],
-#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
 /*TODO: Insert right replacement for PM8038 */
 #ifndef MSM8930_PHASE_2
 	.status_gpio	= PM8921_GPIO_PM_TO_SYS(26),
@@ -280,7 +277,6 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 #endif
 	.irq_flags	= IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 	.is_status_gpio_active_low = true,
-#endif
 	.xpc_cap	= 1,
 	.uhs_caps	= (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
 			MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_DDR50 |
@@ -325,7 +321,7 @@ void __init msm8930_init_mmc(void)
 	/* SDC3: External card slot */
 	if (!machine_is_msm8930_cdp()) {
 		msm8960_sdc3_data.wpswitch_gpio = 0;
-		msm8960_sdc3_data.wpswitch_polarity = 0;
+		msm8960_sdc3_data.is_wpswitch_active_low = false;
 	}
 
 	msm_add_sdcc(3, &msm8960_sdc3_data);

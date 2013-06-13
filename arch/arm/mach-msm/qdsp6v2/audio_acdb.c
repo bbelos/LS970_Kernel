@@ -15,12 +15,12 @@
 #include <linux/miscdevice.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <linux/mm.h>
 #include <mach/qdsp6v2/audio_acdb.h>
 
 
-#define MAX_NETWORKS		12
+#define MAX_NETWORKS		15
 
 struct sidetone_atomic_cal {
 	atomic_t	enable;
@@ -646,7 +646,7 @@ static int register_memory(void)
 		goto err;
 	}
 
-	acdb_data.ion_handle = ion_import_fd(acdb_data.ion_client,
+	acdb_data.ion_handle = ion_import_dma_buf(acdb_data.ion_client,
 		atomic_read(&acdb_data.map_handle));
 	if (IS_ERR_OR_NULL(acdb_data.ion_handle)) {
 		pr_err("%s: Could not import map handle!!!\n", __func__);

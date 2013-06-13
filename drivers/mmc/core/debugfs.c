@@ -7,17 +7,28 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/moduleparam.h>
+#include <linux/export.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
+#include <linux/fault-inject.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 
 #include "core.h"
 #include "mmc_ops.h"
+
+#ifdef CONFIG_FAIL_MMC_REQUEST
+
+static DECLARE_FAULT_ATTR(fail_default_attr);
+static char *fail_request;
+module_param(fail_request, charp, 0);
+
+#endif /* CONFIG_FAIL_MMC_REQUEST */
 
 /* The debugfs functions are optimized away when CONFIG_DEBUG_FS isn't set. */
 static int mmc_ios_show(struct seq_file *s, void *data)
@@ -46,6 +57,8 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 	const char *str;
 
 	seq_printf(s, "clock:\t\t%u Hz\n", ios->clock);
+	if (host->actual_clock)
+		seq_printf(s, "actual clock:\t%u Hz\n", host->actual_clock);
 	seq_printf(s, "vdd:\t\t%u ", ios->vdd);
 	if ((1 << ios->vdd) & MMC_VDD_165_195)
 		seq_printf(s, "(1.65 - 1.95 V)\n");
@@ -113,6 +126,15 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 	case MMC_TIMING_SD_HS:
 		str = "sd high-speed";
 		break;
+	case MMC_TIMING_UHS_SDR50:
+		str = "sd uhs SDR50";
+		break;
+	case MMC_TIMING_UHS_SDR104:
+		str = "sd uhs SDR104";
+		break;
+	case MMC_TIMING_UHS_DDR50:
+		str = "sd uhs DDR50";
+		break;
 	case MMC_TIMING_MMC_HS200:
 		str = "mmc high-speed SDR200";
 		break;
@@ -121,6 +143,26 @@ static int mmc_ios_show(struct seq_file *s, void *data)
 		break;
 	}
 	seq_printf(s, "timing spec:\t%u (%s)\n", ios->timing, str);
+
+	switch(ios->signal_voltage)
+	{
+
+	case MMC_SIGNAL_VOLTAGE_330:
+		seq_printf(s, "signalling voltage:\t 3.3V \n");
+		break;
+
+	case MMC_SIGNAL_VOLTAGE_180:
+		seq_printf(s, "signalling voltage:\t 1.8V \n");
+		break;
+
+	case MMC_SIGNAL_VOLTAGE_120:
+		seq_printf(s, "signalling voltage:\t 1.2V \n");
+		break;
+
+	default:
+		seq_printf(s, "signalling voltage:\t UnKnown \n");
+		break;
+	}
 
 	return 0;
 }
@@ -191,6 +233,15 @@ void mmc_add_host_debugfs(struct mmc_host *host)
 				root, &host->clk_delay))
 		goto err_node;
 #endif
+#ifdef CONFIG_FAIL_MMC_REQUEST
+	if (fail_request)
+		setup_fault_attr(&fail_default_attr, fail_request);
+	host->fail_mmc_request = fail_default_attr;
+	if (IS_ERR(fault_create_debugfs_attr("fail_mmc_request",
+					     root,
+					     &host->fail_mmc_request)))
+		goto err_node;
+#endif
 	return;
 
 err_node:
@@ -227,7 +278,7 @@ DEFINE_SIMPLE_ATTRIBUTE(mmc_dbg_card_status_fops, mmc_dbg_card_status_get,
 #ifdef CONFIG_MACH_LGE
 /* LGE_CHANGE
 * http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-* 2012-07-09, J1-FS@lge.com
+* 2012-10-30, J1-FS@lge.com
 */
 static int mmc_ext_csd_read(struct seq_file *s, void *data)
 #else
@@ -239,7 +290,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	struct mmc_card *card = s->private;
 #else
@@ -251,7 +302,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	u8 ext_csd_rev;
 	int err;
@@ -277,7 +328,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	ext_csd_rev = ext_csd[192];
 #else
@@ -294,7 +345,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 
 	switch (ext_csd_rev) {
@@ -497,7 +548,7 @@ out_free:
 #ifndef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	kfree(buf);
 #endif
@@ -508,7 +559,7 @@ out_free:
 #ifdef CONFIG_MACH_LGE
 /* LGE_CHANGE
 * http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-* 2012-07-09, J1-FS@lge.com
+* 2012-10-30, J1-FS@lge.com
 */
 static int mmc_ext_csd_open(struct inode *inode, struct file *file)
 #else
@@ -519,7 +570,7 @@ static ssize_t mmc_ext_csd_read(struct file *filp, char __user *ubuf,
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	return single_open(file, mmc_ext_csd_read, inode->i_private);
 #else
@@ -541,7 +592,7 @@ static const struct file_operations mmc_dbg_ext_csd_fops = {
 #ifdef CONFIG_MACH_LGE
 	/* LGE_CHANGE
 	* http://www.mail-archive.com/linux-mmc@vger.kernel.org/msg10669.html
-	* 2012-07-09, J1-FS@lge.com
+	* 2012-10-30, J1-FS@lge.com
 	*/
 	.read		   = seq_read,
 	.llseek 		= seq_lseek,
@@ -552,6 +603,7 @@ static const struct file_operations mmc_dbg_ext_csd_fops = {
 	.llseek		= default_llseek,
 #endif
 };
+
 static int mmc_wr_pack_stats_open(struct inode *inode, struct file *filp)
 {
 	struct mmc_card *card = inode->i_private;
@@ -664,6 +716,14 @@ static ssize_t mmc_wr_pack_stats_read(struct file *filp, char __user *ubuf,
 			 "%s: %d times: Threshold\n",
 			mmc_hostname(card->host),
 			pack_stats->pack_stop_reason[THRESHOLD]);
+		strlcat(ubuf, temp_buf, cnt);
+	}
+
+	if (pack_stats->pack_stop_reason[LARGE_SEC_ALIGN]) {
+		snprintf(temp_buf, TEMP_BUF_SIZE,
+			 "%s: %d times: Large sector alignment\n",
+			mmc_hostname(card->host),
+			pack_stats->pack_stop_reason[LARGE_SEC_ALIGN]);
 		strlcat(ubuf, temp_buf, cnt);
 	}
 

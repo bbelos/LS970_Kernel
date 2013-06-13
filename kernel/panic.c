@@ -24,29 +24,9 @@
 #include <linux/nmi.h>
 #include <linux/dmi.h>
 
-#ifdef CONFIG_LGE_EMS_CH
-#include <mach/hsic_debug_ch.h>
-#endif
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
 
-#ifdef CONFIG_LGE_EMS_CH
-extern sEMS_PRx_Data	gP_ems_data;
-extern int ems_mdm_crash_fatal_flag;		// refer to mdm.c
-extern int ems_mdm_status_low_flag;		// refer to mdm.c
-extern int ems_the_kind_of_subsys;	// refer to subsystem_restart.c
-void store_ems_crash_log(void);
-
-enum {
-	EMS_NO_SUBSYSTEM,			// no subsystem crash was occurred.
-	EMS_SUBSYSTEM_MODEM,		// AP 8k modem subsystem crash was occured.
-	EMS_SUBSYSTEM_RIVA,		
-	EMS_SUBSYSTEM_DSPS,
-	EMS_SUBSYSTEM_LPASS,		// AP lpass subsystem crash was occured.
-	EMS_SUBSYSTEM_MDM,		// mdm  subsystem crash was occurred.	
-	EMS_SUBSYSTEM_OTHER		// this should not be used.	
-};
-#endif
 /* Machine specific panic information string */
 char *mach_panic_string;
 
@@ -75,6 +55,15 @@ static long no_blink(int state)
 long (*panic_blink)(int state);
 EXPORT_SYMBOL(panic_blink);
 
+/*
+ * Stop ourself in panic -- architecture code may override this
+ */
+void __weak panic_smp_self_stop(void)
+{
+	while (1)
+		cpu_relax();
+}
+
 /**
  *	panic - halt the system
  *	@fmt: The text string to print
@@ -83,8 +72,9 @@ EXPORT_SYMBOL(panic_blink);
  *
  *	This function never returns.
  */
-NORET_TYPE void panic(const char * fmt, ...)
+void panic(const char *fmt, ...)
 {
+	static DEFINE_SPINLOCK(panic_lock);
 	static char buf[1024];
 	va_list args;
 	long i, i_next = 0;
@@ -102,8 +92,14 @@ NORET_TYPE void panic(const char * fmt, ...)
 	 * It's possible to come here directly from a panic-assertion and
 	 * not have preempt disabled. Some functions called from here want
 	 * preempt to be disabled. No point enabling it later though...
+	 *
+	 * Only one CPU is allowed to execute the panic code from here. For
+	 * multiple parallel invocations of panic, all other CPUs either
+	 * stop themself or will wait until they are stopped by the 1st CPU
+	 * with smp_send_stop().
 	 */
-	preempt_disable();
+	if (!spin_trylock(&panic_lock))
+		panic_smp_self_stop();
 
 	console_verbose();
 	bust_spinlocks(1);
@@ -115,14 +111,15 @@ NORET_TYPE void panic(const char * fmt, ...)
 	lge_set_kernel_crash_magic();
 #endif
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
-#ifdef CONFIG_LGE_EMS_CH
-	store_ems_crash_log();
-#endif
 #ifdef CONFIG_LGE_HANDLE_PANIC
 	set_crash_store_disable();
 #endif
 #ifdef CONFIG_DEBUG_BUGVERBOSE
-	dump_stack();
+	/*
+	 * Avoid nested stack-dumping if a panic occurs during oops processing
+	 */
+	if (!test_taint(TAINT_DIE) && oops_in_progress <= 1)
+		dump_stack();
 #endif
 
 	/*
@@ -163,6 +160,8 @@ NORET_TYPE void panic(const char * fmt, ...)
 			}
 			mdelay(PANIC_TIMER_STEP);
 		}
+	}
+	if (panic_timeout != 0) {
 		/*
 		 * This will not be a clean reboot, with everything
 		 * shutting down.  But if there is a chance of
@@ -197,82 +196,6 @@ NORET_TYPE void panic(const char * fmt, ...)
 	}
 }
 
-#ifdef CONFIG_LGE_EMS_CH
-void store_ems_crash_log()
-{	
-	const char *EMS_ARCH[] ={
-				"EMS_NONE",
-				"A(1)",
-				"M(2)" };
-				
-	if (ems_the_kind_of_subsys > EMS_NO_SUBSYSTEM)
-	{
-		set_crash_store_enable();
-		if(ems_mdm_crash_fatal_flag == true)
-		{
-			printk(KERN_EMERG "\n\nCheck MP side operation (9k_modem)(%d)(%d)!!\n", ems_mdm_crash_fatal_flag, ems_mdm_status_low_flag);		
-			if(gP_ems_data.valid)
-			{
-				printk(KERN_EMERG "\n-------------------------------------------------\n");
-				printk(KERN_EMERG "MDM CRASH!!!\n");
-				printk(KERN_EMERG "[EMS_CRASH_POINT] L : %s, File : %s, Line : %d\n", EMS_ARCH[gP_ems_data.rx_data.header.arch_type], gP_ems_data.rx_data.filename, gP_ems_data.rx_data.line);
-				printk(KERN_EMERG "[EMS_CRASH_MSG] %s \n", gP_ems_data.rx_data.msg);
-				printk(KERN_EMERG "[SW_VERSION] %s \n", gP_ems_data.rx_data.sw_ver);
-				printk(KERN_EMERG "-------------------------------------------------\n");
-			}
-			else 
-			{
-				printk(KERN_EMERG "MDM Crash occured! (but, NO EMS LOG)(%d)(%d)",ems_mdm_crash_fatal_flag,ems_mdm_status_low_flag);
-			}
-		}
-		else // other subsystem crash (8k modem, lpass) or mdm2ap status is low
-		{		
-			if (ems_the_kind_of_subsys == EMS_SUBSYSTEM_RIVA)
-			{
-				printk(KERN_EMERG "\n\nCheck AP side operation(riva)!!\n");
-			}
-			if (ems_the_kind_of_subsys == EMS_SUBSYSTEM_DSPS)
-			{
-				printk(KERN_EMERG "\n\nCheck AP side operation(dsps)!!\n");
-			}				
-			else if (ems_the_kind_of_subsys == EMS_SUBSYSTEM_LPASS)
-			{
-				printk(KERN_EMERG "\n\nCheck AP side operation(lpass)!!\n");
-			}
-			else
-			{
-				if (ems_mdm_status_low_flag == true)
-				{
-					printk(KERN_EMERG "\n\nCheck MDM side operation(%d)(%d)!!\n",ems_mdm_crash_fatal_flag,ems_mdm_status_low_flag);
-					if(gP_ems_data.valid == true)
-					{
-						printk(KERN_EMERG "\n-------------------------------------------------\n");
-						printk(KERN_EMERG "MDM CRASH!!!\n");
-						printk(KERN_EMERG "[EMS_CRASH_POINT] Loc : %s, File : %s, Line : %d\n", EMS_ARCH[gP_ems_data.rx_data.header.arch_type], gP_ems_data.rx_data.filename, gP_ems_data.rx_data.line);
-						printk(KERN_EMERG "[EMS_CRASH_MSG] %s \n", gP_ems_data.rx_data.msg);
-						printk(KERN_EMERG "[SW_VERSION] %s \n", gP_ems_data.rx_data.sw_ver);
-						printk(KERN_EMERG "-------------------------------------------------\n");
-					}
-				}
-				else {
-					printk(KERN_EMERG "\n\nCheck AP side operation(Analyse kernel log)!!\n");				
-				}
-			}	
-			
-		}
-	}
-	else {
-		; // may be kernel panic - no operation..
-	}
-	set_crash_store_disable();
-	ems_the_kind_of_subsys = EMS_NO_SUBSYSTEM;
-	ems_mdm_crash_fatal_flag = false;
-	ems_mdm_status_low_flag = false;
-	printk(KERN_EMERG "\n\n");	
-
-
-}
-#endif
 EXPORT_SYMBOL(panic);
 
 
@@ -295,6 +218,7 @@ static const struct tnt tnts[] = {
 	{ TAINT_WARN,			'W', ' ' },
 	{ TAINT_CRAP,			'C', ' ' },
 	{ TAINT_FIRMWARE_WORKAROUND,	'I', ' ' },
+	{ TAINT_OOT_MODULE,		'O', ' ' },
 };
 
 /**
@@ -312,6 +236,7 @@ static const struct tnt tnts[] = {
  *  'W' - Taint on warning.
  *  'C' - modules from drivers/staging are loaded.
  *  'I' - Working around severe firmware bug.
+ *  'O' - Out-of-tree module has been loaded.
  *
  *	The string is overwritten by the next call to print_tainted().
  */
@@ -353,11 +278,12 @@ void add_taint(unsigned flag)
 	 * Can't trust the integrity of the kernel anymore.
 	 * We don't call directly debug_locks_off() because the issue
 	 * is not necessarily serious enough to set oops_in_progress to 1
-	 * Also we want to keep up lockdep for staging development and
-	 * post-warning case.
+	 * Also we want to keep up lockdep for staging/out-of-tree
+	 * development and post-warning case.
 	 */
 	switch (flag) {
 	case TAINT_CRAP:
+	case TAINT_OOT_MODULE:
 	case TAINT_WARN:
 	case TAINT_FIRMWARE_WORKAROUND:
 		break;

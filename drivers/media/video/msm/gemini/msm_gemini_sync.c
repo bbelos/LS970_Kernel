@@ -218,6 +218,7 @@ int msm_gemini_evt_get(struct msm_gemini_device *pgmn_dev,
 		return -EAGAIN;
 	}
 
+	memset(&ctrl_cmd, 0, sizeof(struct msm_gemini_ctrl_cmd));
 	ctrl_cmd.type = buf_p->vbuf.type;
 	kfree(buf_p);
 
@@ -280,6 +281,7 @@ int msm_gemini_we_pingpong_irq(struct msm_gemini_device *pgmn_dev,
 		GMN_DBG("%s:%d] no output return buffer\n", __func__,
 			__LINE__);
 		rc = -1;
+		return rc;
 	}
 
 	buf_out = msm_gemini_q_out(&pgmn_dev->output_buf_q);
@@ -484,11 +486,12 @@ int msm_gemini_input_buf_enqueue(struct msm_gemini_device *pgmn_dev,
 	} else {
 	buf_p->y_buffer_addr    = msm_gemini_platform_v2p(buf_cmd.fd,
 		buf_cmd.y_len + buf_cmd.cbcr_len, &buf_p->file,
-		&buf_p->handle)	+ buf_cmd.offset + buf_cmd.y_off; //QCT patch, W6M_Corruption_fix, 2012-06-15, freeso.kim
+		&buf_p->handle)	+ buf_cmd.offset + buf_cmd.y_off;
 	}
 	buf_p->y_len          = buf_cmd.y_len;
 
-	buf_p->cbcr_buffer_addr = buf_p->y_buffer_addr + buf_cmd.y_len + buf_cmd.cbcr_off; //QCT patch, W6M_Corruption_fix, 2012-06-15, freeso.kim
+	buf_p->cbcr_buffer_addr = buf_p->y_buffer_addr + buf_cmd.y_len +
+					buf_cmd.cbcr_off;
 	buf_p->cbcr_len       = buf_cmd.cbcr_len;
 	buf_p->num_of_mcu_rows = buf_cmd.num_of_mcu_rows;
 	GMN_DBG("%s: y_addr=%x,y_len=%x,cbcr_addr=%x,cbcr_len=%x\n", __func__,

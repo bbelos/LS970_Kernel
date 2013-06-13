@@ -11,6 +11,10 @@
 
 #include "radio-mb86a35s-dev.h"
 
+#define BROADCAST_MMBI_NUM_DEVS 	1 /**< support this many devices */
+//#define PM_QOS
+//#define MMB_WQ_FEATURE
+
 #undef PERFORMANCE_TEST	
 #define WORKAROUND_XX
 
@@ -19,7 +23,11 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/wakelock.h> 		/* wake_lock, unlock */
-#include <linux/pm_qos_params.h>
+
+#ifdef PM_QOS
+//#include <linux/pm_qos_params.h>
+#endif /* PM_QOS */
+
 #include <linux/jiffies.h>
 #include <linux/time.h>
 #include <linux/ktime.h>
@@ -28,7 +36,7 @@
 #endif
 
 #if 1//LGE
-#define QC_SPI_MAX (188*20)
+#define QC_SPI_MAX (188*40)//(188*32)//(188*60)
 
 #ifndef boolean
 typedef unsigned char      boolean;
@@ -40,12 +48,6 @@ typedef unsigned char      boolean;
 #ifndef TRUE
 #define TRUE  1
 #endif
-
-
-#define BROADCAST_MMBI_NUM_DEVS 	1 /**< support this many devices */
-
-//#define PM_QOS
-//#define MMB_WQ_FEATURE
 
 static struct class *broadcast_mmbi_class;
 static dev_t broadcast_mmbi_dev;
@@ -2372,7 +2374,15 @@ int mb86a35_RF_channel(mb86a35_cmdcontrol_t * cmdctrl, u8 mode, u8 chno)
 	}
 
 		if(ui8REVID == 1) MAXVCOOUT = 0x0B;   //For CS1 chip Setting.
+		// Modified by prajuna 20121028 for MAXVCOOUT {
+		/*
 		else MAXVCOOUT = 0x05;  //For CS2 chip Setting.
+		*/
+		//
+		else
+			MAXVCOOUT = 0x07;	// For CS2 chip setting.
+		//
+		// Modified by prajuna 20121028 for MAXVCOOUT }
 		
 		reg = 0x51;
 		rtncode = mb86a35_i2c_rf_recv(reg, &WR51, 1);
@@ -2494,6 +2504,8 @@ int mb86a35_RF_channel(mb86a35_cmdcontrol_t * cmdctrl, u8 mode, u8 chno)
 			else MAXVCOOUT = 0x05;
 
 		}
+		// Modified by prajuna 20121028 for MAXVCOOUT {
+		/*
 		else   //For CS2 chip Setting.
 		{
 			if(VCORG <= 0x1F) MAXVCOOUT = 0x05;
@@ -2502,6 +2514,33 @@ int mb86a35_RF_channel(mb86a35_cmdcontrol_t * cmdctrl, u8 mode, u8 chno)
 			else if(VCORG > 0x7F && VCORG <= 0xAF ) MAXVCOOUT = 0x04;
 			else MAXVCOOUT = 0x02;
 		}
+		*/
+		//
+		else   //For CS2 chip Setting.
+		{
+			if(VCORG <= 0x1F)
+			{
+				MAXVCOOUT = 0x07;
+			}
+			else if(VCORG > 0x1F && VCORG <= 0x5F)
+			{
+				MAXVCOOUT = 0x06;
+			}
+			else if(VCORG > 0x5F && VCORG <= 0x7F)
+			{
+				MAXVCOOUT = 0x06;
+			}
+			else if(VCORG > 0x7F && VCORG <= 0xAF)
+			{
+				MAXVCOOUT = 0x04;
+			}
+			else
+			{
+				MAXVCOOUT = 0x04;
+			}
+		}
+		//
+		// Modified by prajuna 20121028 for MAXVCOOUT }
 
 		reg = 0x51;  
 		value = WR51 | (MAXVCOOUT << 3);
@@ -11029,6 +11068,7 @@ void mb86a35s_irq_work(struct work_struct *work)
 			int i;
 
 			count = read_size/(QC_SPI_MAX);
+			//count +=1;
 			remain_size = read_size%(QC_SPI_MAX);
 
 			for(i=0;i<count;i++)

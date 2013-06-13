@@ -68,7 +68,7 @@ struct uinput_device {
 	unsigned char		head;
 	unsigned char		tail;
 	struct input_event	buff[UINPUT_BUFFER_SIZE];
-	int			ff_effects_max;
+	unsigned int		ff_effects_max;
 
 	struct uinput_request	*requests[UINPUT_NUM_REQUESTS];
 	wait_queue_head_t	requests_waitq;
@@ -172,5 +172,13 @@ struct uinput_user_dev {
 	int absfuzz[ABS_CNT];
 	int absflat[ABS_CNT];
 };
+
+struct uinput_event {
+	struct timeval time;
+	uint16_t type;
+	uint16_t code;
+	int32_t value;
+};
+
 #endif	/* __UINPUT_H_ */
 

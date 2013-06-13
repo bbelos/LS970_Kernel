@@ -371,9 +371,9 @@ static ssize_t felica_write(struct file *fp, const char *buf, size_t count, loff
 #ifdef FELICA_FN_DEVICE_TEST
   FELICA_DEBUG_MSG("[FELICA] felica_write - result_write_uart(%d) \n",result_write_uart);
   if(result_write_uart != -1) {
-  	if (writecount == 0)
-  	  result_write_uart = -1;
-	else
+    if (writecount == 0)
+      result_write_uart = -1;
+    else
       result_write_uart = writecount;
 	}
     return result_write_uart;
@@ -527,7 +527,7 @@ static long felica_ioctl (struct file *fp, unsigned int cmd, unsigned long arg)
 * Input :
 * Output :
 */
-static int felica_fsync(struct file *fp, int datasync)
+static int felica_fsync(struct file *fp, loff_t param1, loff_t param2, int datasync)
 {
    FELICA_DEBUG_MSG("[FELICA] felica_fsync\n");
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2010, 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -51,17 +51,9 @@ static void notify_work_start_reset(struct work_struct *work)
 }
 static DECLARE_WORK(modem_notifier_start_reset_work, &notify_work_start_reset);
 
-
 void modem_queue_start_reset_notify(void)
 {
 	int ret;
-
-	/* LGE_CHANGES */
-	{
-			extern void dsps_disable_irq_crash_handler(void);
-			dsps_disable_irq_crash_handler();
-	}
-	/* END LGE_CHANGES */
 
 	ret = queue_work(modem_notifier_wq, &modem_notifier_start_reset_work);
 
@@ -201,8 +193,15 @@ static void register_test_notifier(void)
 }
 #endif
 
-static int __init init_modem_notifier_list(void)
+int __init msm_init_modem_notifier_list(void)
 {
+	static bool registered;
+
+	if (registered)
+		return 0;
+
+	registered = true;
+
 	srcu_init_notifier_head(&modem_notifier_list);
 	modem_notifier_debugfs_init();
 #if defined(DEBUG)
@@ -218,4 +217,4 @@ static int __init init_modem_notifier_list(void)
 
 	return 0;
 }
-module_init(init_modem_notifier_list);
+module_init(msm_init_modem_notifier_list);

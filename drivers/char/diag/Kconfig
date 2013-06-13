@@ -29,7 +29,6 @@ config LGE_SLATE
 	help
 	 This feature helps decide whether slate key logging start message would be routed to apps or not.
 endmenu
-
 menu "SDIO support for DIAG"
 
 config DIAG_SDIO_PIPE
@@ -42,26 +41,15 @@ endmenu
 
 menu "HSIC support for DIAG"
 
-config DIAG_HSIC_PIPE
+config DIAG_BRIDGE_CODE
 	depends on USB_QCOM_DIAG_BRIDGE
 	default y
-	bool "Enable 9K DIAG traffic over HSIC"
+	bool "Enable QSC/9K DIAG traffic over SMUX/HSIC"
 	help
-	 HSIC Transport Layer for DIAG Router
+	 SMUX/HSIC Transport Layer for DIAG Router
 endmenu
 
-menu "LGE DM APP Support"
-
-config LGE_DM_APP
-	bool "LGE DM APP Support"
-	default n
-	depends on MACH_LGE
-	help
-	 LGE DM APP Support
-endmenu
-
-menu "USB Diag Disable"
-
+menu "USB Only Diag Disable"
 config LGE_USB_DIAG_DISABLE
 	default n
 	bool "Disable diag function"
@@ -78,13 +66,12 @@ config LGE_USB_DIAG_DISABLE_ONLY_MDM
 	 Provide method of MDM diag enable or disable
 endmenu
 
-menu "LGE DIAG MTS Daemon Support"
+menu "LGE DM APP Support"
 
-config LGE_MTS
-	bool "LGE Diag MTS Daemon Support"
+config LGE_DM_APP
+	bool "LGE DM APP Support"
 	default n
 	depends on MACH_LGE
 	help
-	 LGE DIAG MTS Support
+	 LGE DM APP Support
 endmenu
-

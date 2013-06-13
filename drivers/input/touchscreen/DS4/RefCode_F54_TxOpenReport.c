@@ -47,7 +47,7 @@ unsigned char F54_TxOpenReport(void)
 #else   
    printk("\nBin #: 6		Name: Transmitter Open Test\n");
 #endif
-   for (i = 0; i < 30; i++)
+   for (i = 0; i < CFG_F54_TXCOUNT; i++)
 		ImageArray[i] = 1;
 
    // Set report mode
@@ -74,7 +74,7 @@ unsigned char F54_TxOpenReport(void)
 	
 	// One bit per transmitter channel
 	k = 0;		
-	for (i = 0; i < 32; i++)
+	for (i = 0; i < CFG_F54_TXCOUNT; i++)
 	{
 		 k = i / 8;
 		 shift = i % 8;

@@ -28,6 +28,9 @@
 #include <media/v4l2-common.h>
 #include <media/vcap_fmt.h>
 #include <mach/board.h>
+#include <mach/iommu_domains.h>
+
+#define to_client_data(val)     container_of(val, struct vcap_client_data, vfh)
 
 #define writel_iowmb(val, addr)		\
 	do {							\
@@ -35,14 +38,16 @@
 		writel_relaxed(val, addr);	\
 	} while (0)
 
-struct vcap_client_data;
+#define VCAP_BASE (dev->vcapbase)
+#define VCAP_OFFSET(off) (VCAP_BASE + off)
 
-enum rdy_buf {
-	VC_NO_BUF = 0,
-	VC_BUF1 = 1 << 1,
-	VC_BUF2 = 1 << 2,
-	VC_BUF1N2 = 0x11 << 1,
-};
+#define VCAP_SW_RESET_REQ (VCAP_BASE + 0x024)
+#define VCAP_SW_RESET_STATUS (VCAP_BASE + 0x028)
+
+#define VCAP_VP_MIN_BUF 4
+#define VCAP_VC_MAX_BUF 6
+#define VCAP_VC_MIN_BUF 2
+struct vcap_client_data;
 
 enum vp_state {
 	VP_UNKNOWN = 0,
@@ -72,27 +77,22 @@ enum vcap_op_mode {
 	VC_AND_VP_VCAP_OP,
 };
 
-struct vcap_action {
+struct vc_action {
 	struct list_head		active;
 
 	/* thread for generating video stream*/
-	struct task_struct		*kthread;
 	wait_queue_head_t		wq;
 
 	/* Buffer index */
-	enum rdy_buf            buf_ind;
+	uint8_t					tot_buf;
+	uint8_t					buf_num;
 
 	/* Buffers inside vc */
-	struct vcap_buffer      *buf1;
-	struct vcap_buffer      *buf2;
-
-	/* Counters to control fps rate */
-	int						frame;
-	int						ini_jiffies;
+	struct vcap_buffer      *buf[6];
 };
 
 struct nr_buffer {
-	void						*vaddr;
+	struct ion_handle			*nr_handle;
 	unsigned long				paddr;
 	enum nr_buf_pos				nr_pos;
 };
@@ -116,15 +116,14 @@ struct vp_action {
 
 	struct vcap_buffer      *bufOut;
 
+	struct ion_handle		*motionHandle;
 	void					*bufMotion;
 	struct nr_buffer		bufNR;
-	bool					nr_enabled;
 };
 
 struct vp_work_t {
 	struct work_struct work;
 	struct vcap_client_data *cd;
-	uint32_t irq;
 };
 
 struct vcap_dev {
@@ -146,6 +145,7 @@ struct vcap_dev {
 	struct clk				*vcap_clk;
 	struct clk				*vcap_p_clk;
 	struct clk				*vcap_npl_clk;
+	struct device			*ddev;
 	/*struct platform_device	*pdev;*/
 
 	uint32_t				bus_client_handle;
@@ -156,13 +156,24 @@ struct vcap_dev {
 	atomic_t			    vc_enabled;
 	atomic_t			    vp_enabled;
 
-	atomic_t				vc_resource;
-	atomic_t				vp_resource;
+	struct mutex			dev_mutex;
+	atomic_t			    open_clients;
+	bool					vc_resource;
+	bool					vp_resource;
+	bool					vp_dummy_event;
+	bool					vp_dummy_complete;
+	bool					vp_shutdown;
+	wait_queue_head_t		vp_dummy_waitq;
+
+	uint8_t					vc_tot_buf;
 
 	struct workqueue_struct	*vcap_wq;
 	struct vp_work_t		vp_work;
 	struct vp_work_t		vc_to_vp_work;
 	struct vp_work_t		vp_to_vc_work;
+
+	struct nr_param			nr_param;
+	bool					nr_update;
 };
 
 struct vp_format_data {
@@ -194,8 +205,8 @@ struct vcap_client_data {
 	struct vp_format_data	vp_in_fmt;
 	struct vp_format_data	vp_out_fmt;
 
-	struct vcap_action		vid_vc_action;
-	struct vp_action		vid_vp_action;
+	struct vc_action		vc_action;
+	struct vp_action		vp_action;
 	struct workqueue_struct *vcap_work_q;
 	struct ion_handle			*vc_ion_handle;
 
@@ -204,6 +215,8 @@ struct vcap_client_data {
 
 	spinlock_t				cap_slock;
 	bool					streaming;
+
+	struct v4l2_fh			vfh;
 };
 
 struct vcap_hacked_vals {
@@ -214,9 +227,6 @@ struct vcap_hacked_vals {
 extern struct vcap_hacked_vals hacked_buf[];
 
 #endif
-int free_ion_handle(struct vcap_dev *dev, struct vb2_queue *q,
-					 struct v4l2_buffer *b);
-
-int get_phys_addr(struct vcap_dev *dev, struct vb2_queue *q,
-				  struct v4l2_buffer *b);
+int vcvp_qbuf(struct vb2_queue *q, struct v4l2_buffer *b);
+int vcvp_dqbuf(struct vb2_queue *q, struct v4l2_buffer *b);
 #endif

@@ -13,6 +13,8 @@
 
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/cpumask.h>
+#include <linux/module.h>
 
 static int eco_cpu_num = 4;
 
@@ -46,7 +48,7 @@ static int eco_cpu_store(struct device *dev, struct device_attribute *attr, cons
 
 	return count;
 }
-DEVICE_ATTR(eco_cpu, 0774, eco_cpu_show, eco_cpu_store);
+DEVICE_ATTR(eco_cpu, 0664, eco_cpu_show, eco_cpu_store);
 
 static int lge_kernel_driver_probe(struct platform_device *pdev)
 {

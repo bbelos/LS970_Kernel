@@ -27,6 +27,7 @@
 
 struct kgsl_device;
 struct kgsl_device_private;
+struct adreno_recovery_data;
 
 #define GSL_RB_MEMPTRS_SCRATCH_COUNT	 8
 struct kgsl_rbmemptrs {
@@ -109,20 +110,29 @@ unsigned int adreno_ringbuffer_issuecmds(struct kgsl_device *device,
 					unsigned int *cmdaddr,
 					int sizedwords);
 
+void adreno_ringbuffer_issuecmds_intr(struct kgsl_device *device,
+					struct kgsl_context *k_ctxt,
+					unsigned int *cmdaddr,
+					int sizedwords);
+
 void adreno_ringbuffer_submit(struct adreno_ringbuffer *rb);
 
 void kgsl_cp_intrcallback(struct kgsl_device *device);
 
 int adreno_ringbuffer_extract(struct adreno_ringbuffer *rb,
-				unsigned int *temp_rb_buffer,
-				int *rb_size);
+				struct adreno_recovery_data *rec_data);
 
 void
 adreno_ringbuffer_restore(struct adreno_ringbuffer *rb, unsigned int *rb_buff,
 			int num_rb_contents);
 
 unsigned int *adreno_ringbuffer_allocspace(struct adreno_ringbuffer *rb,
-					     unsigned int numcmds);
+						struct adreno_context *context,
+						unsigned int numcmds);
+
+int adreno_ringbuffer_read_pfp_ucode(struct kgsl_device *device);
+
+int adreno_ringbuffer_read_pm4_ucode(struct kgsl_device *device);
 
 static inline int adreno_ringbuffer_count(struct adreno_ringbuffer *rb,
 	unsigned int rptr)
@@ -137,6 +147,13 @@ static inline unsigned int adreno_ringbuffer_inc_wrapped(unsigned int val,
 							unsigned int size)
 {
 	return (val + sizeof(unsigned int)) % size;
+}
+
+/* Decrement a value by 4 bytes with wrap-around based on size */
+static inline unsigned int adreno_ringbuffer_dec_wrapped(unsigned int val,
+							unsigned int size)
+{
+	return (val + size - sizeof(unsigned int)) % size;
 }
 
 #endif  /* __ADRENO_RINGBUFFER_H */

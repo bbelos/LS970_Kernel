@@ -1,5 +1,6 @@
-
-/* Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
+/*
+ *  Copyright (C) 2011-2012, LG Eletronics,Inc. All rights reserved.
+ *      LGIT LCD device driver
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -33,15 +34,13 @@
 
 int mipi_lgit_device_register(struct msm_panel_info *pinfo,
 					u32 channel, u32 panel);
-
-// daewoo.kwak@lge.com 2012-01-18 add the on, off function.
 int mipi_lgit_lcd_on(struct platform_device *pdev);
 int mipi_lgit_lcd_off(struct platform_device *pdev);
 
 int mipi_lgit_lcd_off_for_shutdown(void);
-//LGE_UPDATE_S hojin.ryu@lge.com 20120625
+//LGE_UPDATE_S hojin.ryu@lge.com 20111107
 int mipi_lgit_lcd_ief_off(void);
 int mipi_lgit_lcd_ief_on(void);
-//LGE_UPDATE_E hojin.ryu@lge.com 20120625
+//LGE_UPDATE_E hojin.ryu@lge.com 20121107
 
 #endif  /* MIPI_LGIT_H */

@@ -13,7 +13,7 @@
 #ifndef __ARCH_ARM_MACH_MSM_BOARD_APQ8064_H
 #define __ARCH_ARM_MACH_MSM_BOARD_APQ8064_H
 
-#include <linux/regulator/gpio-regulator.h>
+#include <linux/regulator/msm-gpio-regulator.h>
 #include <linux/mfd/pm8xxx/pm8921.h>
 #include <linux/mfd/pm8xxx/pm8821.h>
 #include <mach/msm_memtypes.h>
@@ -40,17 +40,21 @@ extern struct pm8xxx_regulator_platform_data
 
 extern int msm8064_pm8921_regulator_pdata_len __devinitdata;
 
+extern struct pm8xxx_regulator_platform_data
+	msm8064_pm8917_regulator_pdata[] __devinitdata;
+
+extern int msm8064_pm8917_regulator_pdata_len __devinitdata;
+
 #define GPIO_VREG_ID_EXT_5V		0
 #define GPIO_VREG_ID_EXT_3P3V		1
 #define GPIO_VREG_ID_EXT_TS_SW		2
 #define GPIO_VREG_ID_EXT_MPP8		3
 
-#define GPIO_VREG_ID_FRC_5V		0
-#define GPIO_VREG_ID_AVC_1P2V		1
-#define GPIO_VREG_ID_AVC_1P8V		2
-#define GPIO_VREG_ID_AVC_2P2V		3
-#define GPIO_VREG_ID_AVC_5V		4
-#define GPIO_VREG_ID_AVC_3P3V		5
+#define GPIO_VREG_ID_AVC_1P2V		0
+#define GPIO_VREG_ID_AVC_1P8V		1
+#define GPIO_VREG_ID_AVC_2P2V		2
+#define GPIO_VREG_ID_AVC_5V		3
+#define GPIO_VREG_ID_AVC_3P3V		4
 
 #define APQ8064_EXT_3P3V_REG_EN_GPIO	77
 
@@ -62,6 +66,9 @@ extern struct gpio_regulator_platform_data
 
 extern struct rpm_regulator_platform_data
 	apq8064_rpm_regulator_pdata __devinitdata;
+
+extern struct rpm_regulator_platform_data
+	apq8064_rpm_regulator_pm8921_pdata __devinitdata;
 
 extern struct regulator_init_data msm8064_saw_regulator_pdata_8921_s5;
 extern struct regulator_init_data msm8064_saw_regulator_pdata_8921_s6;
@@ -79,19 +86,29 @@ void apq8064_init_pmic(void);
 extern struct msm_camera_board_info apq8064_camera_board_info;
 void apq8064_init_cam(void);
 
+
+/* Tabla slave address for I2C */
+#define APQ_8064_TABLA_I2C_SLAVE_ADDR		0x0d
+#define APQ_8064_TABLA_ANALOG_I2C_SLAVE_ADDR	0x77
+#define APQ_8064_TABLA_DIGITAL1_I2C_SLAVE_ADDR	0x66
+#define APQ_8064_TABLA_DIGITAL2_I2C_SLAVE_ADDR	0x55
+
 #define APQ_8064_GSBI1_QUP_I2C_BUS_ID 0
 #define APQ_8064_GSBI3_QUP_I2C_BUS_ID 3
 #define APQ_8064_GSBI4_QUP_I2C_BUS_ID 4
 #define APQ_8064_GSBI5_QUP_I2C_BUS_ID 5
 
 unsigned char apq8064_hdmi_as_primary_selected(void);
+unsigned char apq8064_mhl_display_enabled(void);
 void apq8064_init_fb(void);
 void apq8064_allocate_fb_region(void);
 void apq8064_mdp_writeback(struct memtype_reserve *reserve_table);
-void __init apq8064_set_display_params(char *prim_panel, char *ext_panel);
+void __init apq8064_set_display_params(char *prim_panel, char *ext_panel,
+		unsigned char resolution);
 
 void apq8064_init_gpu(void);
 void apq8064_pm8xxx_gpio_mpp_init(void);
+void __init configure_apq8064_pm8917_power_grid(void);
 
 #define PLATFORM_IS_MPQ8064() \
 	(machine_is_mpq8064_hrd() || \

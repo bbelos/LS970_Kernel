@@ -1,6 +1,6 @@
 /*
  *  felica_rfs.h
- *  
+ *
  */
 
 #ifndef __FELICA_UART_H__

@@ -127,9 +127,9 @@ static int __devinit msm_rng_enable_hw(struct msm_rng_device *msm_rng_dev)
 					PRNG_HW_ENABLE;
 	/* PRNG H/W is not ON */
 	if (val != PRNG_HW_ENABLE) {
-		val = readl_relaxed(msm_rng_dev->base + PRNG_LFSR_CFG_OFFSET) &
-					PRNG_LFSR_CFG_MASK;
-		val |= PRNG_LFSR_CFG_MASK;
+		val = readl_relaxed(msm_rng_dev->base + PRNG_LFSR_CFG_OFFSET);
+		val &= PRNG_LFSR_CFG_MASK;
+		val |= PRNG_LFSR_CFG_CLOCKS;
 		writel_relaxed(val, msm_rng_dev->base + PRNG_LFSR_CFG_OFFSET);
 
 		/* The PRNG CONFIG register should be first written */
@@ -231,12 +231,19 @@ static int __devexit msm_rng_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static struct of_device_id qrng_match[] = {
+	{	.compatible = "qcom,msm-rng",
+	},
+	{}
+};
+
 static struct platform_driver rng_driver = {
 	.probe      = msm_rng_probe,
 	.remove     = __devexit_p(msm_rng_remove),
 	.driver     = {
 		.name   = DRIVER_NAME,
 		.owner  = THIS_MODULE,
+		.of_match_table = qrng_match,
 	}
 };
 

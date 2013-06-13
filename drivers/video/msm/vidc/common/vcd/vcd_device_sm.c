@@ -537,12 +537,12 @@ static u32 vcd_init_cmn
 	*driver_handle = 0;
 
 	driver_id = 0;
-	while (driver_id < VCD_DRIVER_INSTANCE_MAX &&
+	while (driver_id < VCD_DRIVER_CLIENTS_MAX &&
 		   dev_ctxt->driver_ids[driver_id]) {
 		++driver_id;
 	}
 
-	if (driver_id == VCD_DRIVER_INSTANCE_MAX) {
+	if (driver_id == VCD_DRIVER_CLIENTS_MAX) {
 		VCD_MSG_ERROR("Max driver instances reached");
 
 		return VCD_ERR_FAIL;
@@ -759,7 +759,6 @@ static u32 vcd_open_cmn
 	client = dev_ctxt->cctxt_list_head;
 	dev_ctxt->cctxt_list_head = cctxt;
 	cctxt->next = client;
-	dev_ctxt->turbo_mode_set = 0;
 
 	*clnt_cctxt = cctxt;
 
@@ -858,7 +857,7 @@ static u32 vcd_close_in_ready
 	} else {
 		VCD_MSG_ERROR("Unsupported API in client state %d",
 				  cctxt->clnt_state.state);
-
+		vcd_destroy_client_context(cctxt);
 		rc = VCD_ERR_BAD_STATE;
 	}
 

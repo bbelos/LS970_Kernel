@@ -5,23 +5,46 @@ SD/MMC/SDIO cards.
 
 Required properties:
   - compatible : should be "qcom,msm-sdcc"
-  - reg : should contain SDCC, BAM register map.
+  - reg : should contain SDCC, SDCC-DML and BAM register map.
+  - reg-names : indicates various resources passed to driver (via reg proptery) by name.
+  "reg-names" examples are "core_mem", "dml_mem" and "bam_mem"
   - interrupts : should contain SDCC core interrupt.
+  - interrupt-names : indicates interrupts passed to driver (via interrupts property) by name.
+  "interrupt-names" examples are "core_irq", "bam_irq" and "status_irq"
   - qcom,sdcc-clk-rates : specifies supported SDCC clock frequencies, Units - Hz.
   - qcom,sdcc-sup-voltages: specifies supported voltage ranges for card. Should always be
 			specified in pairs (min, max), Units - mV.
+  - <supply-name>-supply: phandle to the regulator device tree node
+  "supply-name" examples are "vdd", "vdd-io".
 
 Optional Properties:
 	- cell-index - defines slot ID.
 	- qcom,sdcc-bus-width - defines the bus I/O width that controller supports.
-	- qcom,sdcc-wp-gpio - defines write protect switch gpio.
-	- qcom,sdcc-wp-polarity - specifies the polarity of wp switch.
-	- qcom,sdcc-cd-gpio - defines card detect gpio number.
-	- qcom,sdcc-cd-polarity - specifies the polarity of cd gpio.
+	- wp-gpios - specify GPIO for write protect switch detection.
+	- cd-gpios - specify GPIO for card detection.
 	- qcom,sdcc-nonremovable - specifies whether the card in slot is
 				hot pluggable or hard wired.
 	- qcom,sdcc-disable_cmd23 - disable sending CMD23 to card when controller can't support it.
-	- qcom,sdcc-hs200 - enable eMMC4.5 HS200 bus speed mode
+	- qcom,sdcc-bus-speed-mode - specifies supported bus speed modes by host.
+	- qcom,sdcc-current-limit - specifies max. current the host can drive.
+	- qcom,sdcc-xpc - specifies if the host can supply more than 150mA for SDXC cards.
+
+In the following, <supply> can be vdd (flash core voltage) or vdd-io (I/O voltage).
+	- qcom,sdcc-<supply>-always_on - specifies whether supply should be kept "on" always.
+	- qcom,sdcc-<supply>-lpm_sup - specifies whether supply can be kept in low power mode (lpm).
+	- qcom,sdcc-<supply>-voltage_level - specifies voltage levels for supply. Should be
+	specified in pairs (min, max), units uV.
+	- qcom,sdcc-<supply>-current_level - specifies load levels for supply in lpm or
+	high power mode (hpm). Should be specified in pairs (lpm, hpm), units uA.
+
+	- gpios - specifies gpios assigned for sdcc slot.
+	- qcom,sdcc-gpio-names -  a list of strings that map in order to the list of gpios
+	A slot has either gpios or dedicated tlmm pins as represented below.
+	- qcom,sdcc-pad-pull-on - Active pull configuration for sdc tlmm pins
+	- qcom,sdcc-pad-pull-off - Suspend pull configuration for sdc tlmm pins.
+	- qcom,sdcc-pad-drv-on - Active drive strength configuration for sdc tlmm pins.
+	- qcom,sdcc-pad-drv-off - Suspend drive strength configuration for sdc tlmm pins.
+	Tlmm pins are specified as <clk cmd data>
 
 Example:
 

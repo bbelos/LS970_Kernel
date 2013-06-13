@@ -121,7 +121,7 @@ static void end_test_req(struct request *rq, int err)
 {
 	struct test_request *test_rq;
 
-	test_rq = (struct test_request *)rq->elevator_private[0];
+	test_rq = (struct test_request *)rq->elv.priv[0];
 	BUG_ON(!test_rq);
 
 	test_pr_info("%s: request %d completed, err=%d",
@@ -211,7 +211,7 @@ int test_iosched_add_unique_test_req(int is_err_expcted,
 	test_rq->req_result = -EINVAL;
 	test_rq->rq = rq;
 	test_rq->is_err_expected = is_err_expcted;
-	rq->elevator_private[0] = (void *)test_rq;
+	rq->elv.priv[0] = (void *)test_rq;
 	test_rq->req_id = ptd->unique_next_req_id++;
 
 	test_pr_debug(
@@ -354,7 +354,7 @@ int test_iosched_add_wr_rd_test_req(int is_err_expcted,
 	test_rq->req_result = -EINVAL;
 	test_rq->rq = rq;
 	test_rq->is_err_expected = is_err_expcted;
-	rq->elevator_private[0] = (void *)test_rq;
+	rq->elv.priv[0] = (void *)test_rq;
 
 	test_pr_debug(
 		"%s: added request %d to the test requests list, buf_size=%d",
@@ -857,7 +857,7 @@ static void print_req(struct request *req)
 	if (!req)
 		return;
 
-	test_rq = (struct test_request *)req->elevator_private[0];
+	test_rq = (struct test_request *)req->elv.priv[0];
 
 	if (test_rq) {
 		test_pr_debug("%s: Dispatch request %d: __sector=0x%lx",

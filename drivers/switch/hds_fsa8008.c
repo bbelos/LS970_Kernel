@@ -50,7 +50,7 @@
 #include <linux/input.h>
 #include <linux/debugfs.h>
 #include <linux/wakelock.h>
-//#include <mach/board_lge.h>
+#include <linux/platform_data/hds_fsa8008.h>
 
 #ifdef CONFIG_LGE_AUX_NOISE
 /*
@@ -86,27 +86,6 @@ static struct workqueue_struct *local_fsa8008_workqueue;
 #endif
 
 static struct wake_lock ear_hook_wake_lock;
-
-
-
-
-struct fsa8008_platform_data {
-	const char *switch_name;            /* switch device name */
-	const char *keypad_name;			/* keypad device name */
-
-	unsigned int key_code;				/* key code for hook */
-
-	unsigned int gpio_detect;	/* DET : to detect jack inserted or not */
-	unsigned int gpio_mic_en;	/* EN : to enable mic */
-	unsigned int gpio_jpole;	/* JPOLE : 3pole or 4pole */
-	unsigned int gpio_key;		/* S/E button */
-
-	void (*set_headset_mic_bias)(int enable); /* callback function which is initialized while probing */
-
-	unsigned int latency_for_detection; /* latency for pole (3 or 4)detection (in ms) */
-};
-
-
 
 struct hsd_info {
 /* function devices provided by this driver */
@@ -261,6 +240,7 @@ static void insert_headset(struct hsd_info *hi)
 
 		if (!atomic_read(&hi->irq_key_enabled)) {
 			unsigned long irq_flags;
+			HSD_DBG("irq_key_enabled = FALSE");
 
 			local_irq_save(irq_flags);
 			enable_irq(hi->irq_key);
@@ -700,12 +680,12 @@ static int __init lge_hsd_init(void)
 		return -ENOMEM;
 #endif
 
+	wake_lock_init(&ear_hook_wake_lock, WAKE_LOCK_SUSPEND, "ear_hook");
+
 	ret = platform_driver_register(&lge_hsd_driver);
 	if (ret) {
 		HSD_ERR("Fail to register platform driver\n");
 	}
-
-	wake_lock_init(&ear_hook_wake_lock, WAKE_LOCK_SUSPEND, "ear_hook");
 
 	return ret;
 }

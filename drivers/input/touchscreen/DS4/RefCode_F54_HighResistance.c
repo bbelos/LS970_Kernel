@@ -145,7 +145,7 @@ unsigned char F54_HighResistance(void)
 	{
 #ifdef F54_Porting
 		ret += sprintf(buf+ret, "Test Result: Pass\n");
-		//write_log(buf);
+		write_log(buf);
 #else
 		printk("Test Result: Pass\n");
 #endif
@@ -155,7 +155,7 @@ unsigned char F54_HighResistance(void)
 	{
 #ifdef F54_Porting
 		ret += sprintf(buf+ret, "Test Result: Fail, Result = %d\n", Result);
-		//write_log(buf);
+		write_log(buf);
 #else	
 		printk("Test Result: Fail, Result = %d\n", Result);
 #endif

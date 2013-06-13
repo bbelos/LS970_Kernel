@@ -12,6 +12,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/sched.h>
 #include <mach/socinfo.h>
 
 #include "kgsl.h"
@@ -67,6 +68,14 @@ const unsigned int a3xx_registers[] = {
 };
 
 const unsigned int a3xx_registers_count = ARRAY_SIZE(a3xx_registers) / 2;
+
+/* The set of additional registers to be dumped for A330 */
+
+const unsigned int a330_registers[] = {
+	0x1d0, 0x1d0, 0x1d4, 0x1d4, 0x453, 0x453,
+};
+
+const unsigned int a330_registers_count = ARRAY_SIZE(a330_registers) / 2;
 
 /* Simple macro to facilitate bit setting in the gmem2sys and sys2gmem
  * functions.
@@ -2289,9 +2298,6 @@ static int a3xx_create_gmem_shadow(struct adreno_device *adreno_dev,
 	build_quad_vtxbuff(drawctxt, &drawctxt->context_gmem_shadow,
 		&tmp_ctx.cmd);
 
-	/* Dow we need to idle? */
-	/* adreno_idle(&adreno_dev->dev, KGSL_TIMEOUT_DEFAULT); */
-
 	tmp_ctx.cmd = build_gmem2sys_cmds(adreno_dev, drawctxt,
 		&drawctxt->context_gmem_shadow);
 	tmp_ctx.cmd = build_sys2gmem_cmds(adreno_dev, drawctxt,
@@ -2349,7 +2355,7 @@ static void a3xx_drawctxt_save(struct adreno_device *adreno_dev,
 {
 	struct kgsl_device *device = &adreno_dev->dev;
 
-	if (context == NULL)
+	if (context == NULL || (context->flags & CTXT_FLAGS_BEING_DESTOYED))
 		return;
 
 	if (context->flags & CTXT_FLAGS_GPU_HANG)
@@ -2457,7 +2463,7 @@ static void a3xx_rb_init(struct adreno_device *adreno_dev,
 			 struct adreno_ringbuffer *rb)
 {
 	unsigned int *cmds, cmds_gpu;
-	cmds = adreno_ringbuffer_allocspace(rb, 18);
+	cmds = adreno_ringbuffer_allocspace(rb, NULL, 18);
 	cmds_gpu = rb->buffer_desc.gpuaddr + sizeof(uint) * (rb->wptr - 18);
 
 	GSL_RB_WRITE(cmds, cmds_gpu, cp_type3_packet(CP_ME_INIT, 17));
@@ -2556,30 +2562,29 @@ static void a3xx_err_callback(struct adreno_device *adreno_dev, int bit)
 
 static void a3xx_cp_callback(struct adreno_device *adreno_dev, int irq)
 {
-	struct adreno_ringbuffer *rb = &adreno_dev->ringbuffer;
+	struct kgsl_device *device = &adreno_dev->dev;
 
 	if (irq == A3XX_INT_CP_RB_INT) {
 		unsigned int context_id;
-		kgsl_sharedmem_readl(&adreno_dev->dev.memstore,
-				&context_id,
+		kgsl_sharedmem_readl(&device->memstore, &context_id,
 				KGSL_MEMSTORE_OFFSET(KGSL_MEMSTORE_GLOBAL,
 					current_context));
 		if (context_id < KGSL_MEMSTORE_MAX) {
-			kgsl_sharedmem_writel(&rb->device->memstore,
+			kgsl_sharedmem_writel(&device->memstore,
 					KGSL_MEMSTORE_OFFSET(context_id,
 						ts_cmp_enable), 0);
 			wmb();
 		}
-		KGSL_CMD_WARN(rb->device, "ringbuffer rb interrupt\n");
+		KGSL_CMD_WARN(device, "ringbuffer rb interrupt\n");
 	}
 
-	wake_up_interruptible_all(&rb->device->wait_queue);
+	wake_up_interruptible_all(&device->wait_queue);
 
 	/* Schedule work to free mem and issue ibs */
-	queue_work(rb->device->work_queue, &rb->device->ts_expired_ws);
+	queue_work(device->work_queue, &device->ts_expired_ws);
 
-	atomic_notifier_call_chain(&rb->device->ts_notifier_list,
-				   rb->device->id, NULL);
+	atomic_notifier_call_chain(&device->ts_notifier_list,
+				   device->id, NULL);
 }
 
 #define A3XX_IRQ_CALLBACK(_c) { .func = _c }
@@ -2696,35 +2701,100 @@ static unsigned int a3xx_busy_cycles(struct adreno_device *adreno_dev)
 	return val;
 }
 
+struct a3xx_vbif_data {
+	unsigned int reg;
+	unsigned int val;
+};
+
+/* VBIF registers start after 0x3000 so use 0x0 as end of list marker */
+static struct a3xx_vbif_data a305_vbif[] = {
+	/* Set up 16 deep read/write request queues */
+	{ A3XX_VBIF_IN_RD_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_IN_RD_LIM_CONF1, 0x10101010 },
+	{ A3XX_VBIF_OUT_RD_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_OUT_WR_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_DDR_OUT_MAX_BURST, 0x0000303 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF1, 0x10101010 },
+	/* Enable WR-REQ */
+	{ A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x0000FF },
+	/* Set up round robin arbitration between both AXI ports */
+	{ A3XX_VBIF_ARB_CTL, 0x00000030 },
+	/* Set up AOOO */
+	{ A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000003C },
+	{ A3XX_VBIF_OUT_AXI_AOOO, 0x003C003C },
+	{0, 0},
+};
+
+static struct a3xx_vbif_data a320_vbif[] = {
+	/* Set up 16 deep read/write request queues */
+	{ A3XX_VBIF_IN_RD_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_IN_RD_LIM_CONF1, 0x10101010 },
+	{ A3XX_VBIF_OUT_RD_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_OUT_WR_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_DDR_OUT_MAX_BURST, 0x0000303 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF0, 0x10101010 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF1, 0x10101010 },
+	/* Enable WR-REQ */
+	{ A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x0000FF },
+	/* Set up round robin arbitration between both AXI ports */
+	{ A3XX_VBIF_ARB_CTL, 0x00000030 },
+	/* Set up AOOO */
+	{ A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000003C },
+	{ A3XX_VBIF_OUT_AXI_AOOO, 0x003C003C },
+	/* Enable 1K sort */
+	{ A3XX_VBIF_ABIT_SORT, 0x000000FF },
+	{ A3XX_VBIF_ABIT_SORT_CONF, 0x000000A4 },
+	{0, 0},
+};
+
+static struct a3xx_vbif_data a330_vbif[] = {
+	/* Set up 16 deep read/write request queues */
+	{ A3XX_VBIF_IN_RD_LIM_CONF0, 0x18181818 },
+	{ A3XX_VBIF_IN_RD_LIM_CONF1, 0x18181818 },
+	{ A3XX_VBIF_OUT_RD_LIM_CONF0, 0x18181818 },
+	{ A3XX_VBIF_OUT_WR_LIM_CONF0, 0x18181818 },
+	{ A3XX_VBIF_DDR_OUT_MAX_BURST, 0x0000303 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF0, 0x18181818 },
+	{ A3XX_VBIF_IN_WR_LIM_CONF1, 0x18181818 },
+	/* Enable WR-REQ */
+	{ A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x00003F },
+	/* Set up round robin arbitration between both AXI ports */
+	{ A3XX_VBIF_ARB_CTL, 0x00000030 },
+	/* Set up VBIF_ROUND_ROBIN_QOS_ARB */
+	{ A3XX_VBIF_ROUND_ROBIN_QOS_ARB, 0x0001 },
+	/* Set up AOOO */
+	{ A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000FFFF },
+	{ A3XX_VBIF_OUT_AXI_AOOO, 0xFFFFFFFF },
+	/* Enable 1K sort */
+	{ A3XX_VBIF_ABIT_SORT, 0x1FFFF },
+	{ A3XX_VBIF_ABIT_SORT_CONF, 0x000000A4 },
+	/* Disable VBIF clock gating. This is to enable AXI running
+	 * higher frequency than GPU.
+	 */
+	{ A3XX_VBIF_CLKON, 1 },
+	{0, 0},
+};
+
 static void a3xx_start(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = &adreno_dev->dev;
+	struct a3xx_vbif_data *vbif = NULL;
 
-	/* Set up 16 deep read/write request queues */
+	if (adreno_is_a305(adreno_dev))
+		vbif = a305_vbif;
+	else if (adreno_is_a320(adreno_dev))
+		vbif = a320_vbif;
+	else if (adreno_is_a330(adreno_dev))
+		vbif = a330_vbif;
 
-	adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF1, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_OUT_RD_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_OUT_WR_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_DDR_OUT_MAX_BURST, 0x00000303);
-	adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF1, 0x10101010);
+	BUG_ON(vbif == NULL);
 
-	/* Enable WR-REQ */
-	adreno_regwrite(device, A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x000000FF);
-
-	/* Set up round robin arbitration between both AXI ports */
-	adreno_regwrite(device, A3XX_VBIF_ARB_CTL, 0x00000030);
-
-	/* Set up AOOO */
-	adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000003C);
-	adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO, 0x003C003C);
-
-	if (cpu_is_apq8064()) {
-		/* Enable 1K sort */
-		adreno_regwrite(device, A3XX_VBIF_ABIT_SORT, 0x000000FF);
-		adreno_regwrite(device, A3XX_VBIF_ABIT_SORT_CONF, 0x000000A4);
+	while (vbif->reg != 0) {
+		adreno_regwrite(device, vbif->reg, vbif->val);
+		vbif++;
 	}
+
 	/* Make all blocks contribute to the GPU BUSY perf counter */
 	adreno_regwrite(device, A3XX_RBBM_GPU_BUSY_MASKED, 0xFFFFFFFF);
 
@@ -2749,10 +2819,29 @@ static void a3xx_start(struct adreno_device *adreno_dev)
 	adreno_regwrite(device, A3XX_RBBM_INTERFACE_HANG_INT_CTL,
 			(1 << 16) | 0xFFF);
 
+	/* Enable 64-byte cacheline size. HW Default is 32-byte (0x000000E0). */
+	adreno_regwrite(device, A3XX_UCHE_CACHE_MODE_CONTROL_REG, 0x00000001);
+
 	/* Enable Clock gating */
 	adreno_regwrite(device, A3XX_RBBM_CLOCK_CTL,
 			A3XX_RBBM_CLOCK_CTL_DEFAULT);
 
+	/* Set the OCMEM base address for A330 */
+	if (adreno_is_a330(adreno_dev)) {
+		adreno_regwrite(device, A3XX_RB_GMEM_BASE_ADDR,
+			(unsigned int)(adreno_dev->ocmem_base >> 14));
+	}
+
+	/* Turn on performance counters */
+	adreno_regwrite(device, A3XX_RBBM_PERFCTR_CTL, 0x01);
+
+	/*
+	 * Set SP perfcounter 7 to count SP_FS_FULL_ALU_INSTRUCTIONS
+	 * we will use this to augment our hang detection
+	 */
+
+	adreno_regwrite(device, A3XX_SP_PERFCOUNTER7_SELECT,
+		SP_FS_FULL_ALU_INSTRUCTIONS);
 }
 
 /* Defined in adreno_a3xx_snapshot.c */

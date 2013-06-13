@@ -139,8 +139,7 @@ static void compr_event_handler(uint32_t opcode,
 		case ASM_SESSION_CMD_RUN_V2: {
 			if (!atomic_read(&prtd->pending_buffer))
 				break;
-			pr_debug("%s:writing %d bytes"
-				" of buffer[%d] to dsp\n",
+			pr_debug("%s:writing %d bytes of buffer[%d] to dsp\n",
 				__func__, prtd->pcm_count, prtd->out_head);
 			buf = prtd->audio_client->port[IN].buf;
 			pr_debug("%s:writing buffer[%d] from 0x%08x\n",
@@ -280,7 +279,6 @@ static void populate_codec_list(struct compr_audio *compr,
 static int msm_compr_open(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_soc_pcm_runtime *soc_prtd = substream->private_data;
 	struct compr_audio *compr;
 	struct msm_audio *prtd;
 	int ret = 0;
@@ -320,9 +318,6 @@ static int msm_compr_open(struct snd_pcm_substream *substream)
 	pr_info("%s: session ID %d\n", __func__, prtd->audio_client->session);
 
 	prtd->session_id = prtd->audio_client->session;
-	msm_pcm_routing_reg_phy_stream(soc_prtd->dai_link->be_id,
-			prtd->session_id, substream->stream);
-
 	prtd->cmd_ack = 1;
 
 	ret = snd_pcm_hw_constraint_list(runtime, 0,
@@ -367,8 +362,8 @@ int compressed_set_volume(unsigned volume)
 		rc = q6asm_set_volume(compressed_audio.prtd->audio_client,
 								 volume);
 		if (rc < 0) {
-			pr_err("%s: Send Volume command failed"
-					" rc=%d\n", __func__, rc);
+			pr_err("%s: Send Volume command failed rc=%d\n",
+						__func__, rc);
 		}
 	}
 	compressed_audio.volume = volume;
@@ -461,6 +456,7 @@ static int msm_compr_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct snd_soc_pcm_runtime *soc_prtd = substream->private_data;
 	struct compr_audio *compr = runtime->private_data;
 	struct msm_audio *prtd = &compr->prtd;
 	struct snd_dma_buffer *dma_buf = &substream->dma_buffer;
@@ -478,6 +474,9 @@ static int msm_compr_hw_params(struct snd_pcm_substream *substream,
 		pr_err("%s: Session out open failed\n", __func__);
 		return -ENOMEM;
 	}
+	msm_pcm_routing_reg_phy_stream(soc_prtd->dai_link->be_id,
+			prtd->session_id, substream->stream);
+
 	ret = q6asm_set_io_mode(prtd->audio_client, ASYNC_IO_MODE);
 	if (ret < 0) {
 		pr_err("%s: Set IO mode failed\n", __func__);
@@ -489,8 +488,8 @@ static int msm_compr_hw_params(struct snd_pcm_substream *substream,
 			runtime->hw.period_bytes_min,
 			runtime->hw.periods_max);
 	if (ret < 0) {
-		pr_err("Audio Start: Buffer Allocation failed "
-					"rc = %d\n", ret);
+		pr_err("Audio Start: Buffer Allocation failed rc = %d\n",
+						ret);
 		return -ENOMEM;
 	}
 	buf = prtd->audio_client->port[dir].buf;
@@ -535,12 +534,9 @@ static int msm_compr_ioctl(struct snd_pcm_substream *substream,
 		temp = temp * (runtime->rate/1000);
 		temp = div_u64(temp, 1000);
 		tstamp.sampling_rate = runtime->rate;
-		tstamp.rendered = (size_t)(temp & 0xFFFFFFFF);
-		tstamp.decoded  = (size_t)((temp >> 32) & 0xFFFFFFFF);
 		tstamp.timestamp = timestamp;
-		pr_debug("%s: bytes_consumed:lsb = %d, msb = %d,"
-			"timestamp = %lld,\n",
-			 __func__, tstamp.rendered, tstamp.decoded,
+		pr_debug("%s: bytes_consumed:,timestamp = %lld,\n",
+						__func__,
 			tstamp.timestamp);
 		if (copy_to_user((void *) arg, &tstamp,
 			sizeof(struct snd_compr_tstamp)))
@@ -625,7 +621,11 @@ static struct snd_soc_platform_driver msm_soc_platform = {
 
 static __devinit int msm_compr_probe(struct platform_device *pdev)
 {
-	pr_info("%s: dev name %s\n", __func__, dev_name(&pdev->dev));
+	if (pdev->dev.of_node)
+		dev_set_name(&pdev->dev, "%s", "msm-compr-dsp");
+
+	dev_info(&pdev->dev, "%s: dev name %s\n",
+			 __func__, dev_name(&pdev->dev));
 	return snd_soc_register_platform(&pdev->dev,
 				   &msm_soc_platform);
 }
@@ -636,10 +636,17 @@ static int msm_compr_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id msm_compr_dt_match[] = {
+	{.compatible = "qcom,msm-compr-dsp"},
+	{}
+};
+MODULE_DEVICE_TABLE(of, msm_compr_dt_match);
+
 static struct platform_driver msm_compr_driver = {
 	.driver = {
 		.name = "msm-compr-dsp",
 		.owner = THIS_MODULE,
+		.of_match_table = msm_compr_dt_match,
 	},
 	.probe = msm_compr_probe,
 	.remove = __devexit_p(msm_compr_remove),

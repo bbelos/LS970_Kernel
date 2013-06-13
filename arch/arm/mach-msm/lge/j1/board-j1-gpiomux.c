@@ -1,4 +1,5 @@
 /* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012, LGE Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,15 +16,19 @@
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
+#include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <asm/mach/mmc.h>
 #include <mach/msm_bus_board.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/gpiomux.h>
 #include <mach/socinfo.h>
 #include "devices.h"
+#if defined(CONFIG_MACH_LGE)
 #include "board-j1.h"
+#else
+#include "board-8064.h"
+#endif
 
 #if !defined(CONFIG_MACH_LGE)
 #if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
@@ -96,7 +101,7 @@ static struct gpiomux_setting dmb_int_pin = {
 // LGE_BROADCAST_ONESEG }
 
 /* #ifdef CONFIG_LGE_FELICA_KDDI */
-#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_LGE_FELICA_DCM)
+#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_LGE_FELICA_DCM) || defined(CONFIG_CXD2235AGG_GJ_KDDI)
 static struct gpiomux_setting felica_pon_cfg = {
     .func = GPIOMUX_FUNC_GPIO,
     .drv = GPIOMUX_DRV_2MA,
@@ -122,7 +127,7 @@ static struct gpiomux_setting felica_lockcont_cfg = {
     .pull = GPIOMUX_PULL_NONE,
     .dir = GPIOMUX_OUT_LOW,
 };
-#if defined(CONFIG_LGE_FELICA_KDDI)
+#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_CXD2235AGG_GJ_KDDI)
 static struct gpiomux_setting nfc_hsel_cfg = {
     .func = GPIOMUX_FUNC_GPIO,
     .drv = GPIOMUX_DRV_2MA,
@@ -220,7 +225,7 @@ struct msm_gpiomux_config vcap_configs[] = {
 			[GPIOMUX_ACTIVE] =		&gpio_vcap_config[1],
 		}
 	},
-#if !defined(CONFIG_LGE_FELICA_KDDI)
+#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_CXD2235AGG_GJ_KDDI)
 	{
 		.gpio = 23,
 		.settings = {
@@ -237,7 +242,7 @@ struct msm_gpiomux_config vcap_configs[] = {
 		}
 	},
 /* #ifndef CONFIG_LGE_FELICA_KDDI */
-#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM)
+#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM) && !defined(CONFIG_CXD2235AGG_GJ_KDDI)
 	{
 		.gpio = 22,
 		.settings = {
@@ -410,6 +415,13 @@ static struct gpiomux_setting gpio_i2c_config = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+static struct gpiomux_setting gpio_i2c_2ma_config = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+
 static struct gpiomux_setting gpio_i2c_config_sus = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_2MA,
@@ -460,6 +472,7 @@ static struct gpiomux_setting gsbi4_uart_active = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 #endif
+
 #if defined(CONFIG_LGE_FELICA) || defined(CONFIG_LGE_NFC_SONY_CXD2235AGG)
 static struct gpiomux_setting gsbi6_felica = {
 	.func = GPIOMUX_FUNC_2,
@@ -496,6 +509,20 @@ static struct gpiomux_setting gsbi7_func2_cfg = {
 };
 #endif /* LGE Not Used */
 
+#if defined(CONFIG_LGE_IRRC)
+static struct gpiomux_setting gsbi7_irrc_TXD = {
+       .func = GPIOMUX_FUNC_2,
+       .drv = GPIOMUX_DRV_8MA,
+       .pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting gsbi7_irrc_RXD = {
+       .func = GPIOMUX_FUNC_1,
+       .drv = GPIOMUX_DRV_8MA,
+       .pull = GPIOMUX_PULL_NONE,
+};
+#endif
+
 #if defined (CONFIG_MACH_LGE)
 static struct gpiomux_setting gsbi1_suspended_cfg = {
 	.func = GPIOMUX_FUNC_1,
@@ -520,7 +547,32 @@ static struct gpiomux_setting gsbi2_active_cfg = {
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
 };
-#endif
+#else //Qualcomm original
+static struct gpiomux_setting gsbi1_uart_config = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_16MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting ext_regulator_config = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_LOW,
+};
+
+static struct gpiomux_setting gsbi7_func1_cfg = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting gsbi7_func2_cfg = {
+	.func = GPIOMUX_FUNC_2,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+#endif //#if defined(CONFIG_MACH_LGE)
 
 static struct gpiomux_setting gsbi3_suspended_cfg = {
 	.func = GPIOMUX_FUNC_1,
@@ -553,6 +605,19 @@ static struct gpiomux_setting hdmi_active_2_cfg = {
 };
 
 #if !defined(CONFIG_MACH_LGE)
+static struct gpiomux_setting hdmi_active_3_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_IN,
+};
+
+static struct gpiomux_setting hdmi_active_4_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_OUT_HIGH,
+};
 static struct gpiomux_setting gsbi5_suspended_cfg = {
 	.func = GPIOMUX_FUNC_2,
 	.drv = GPIOMUX_DRV_12MA,
@@ -578,6 +643,7 @@ static struct gpiomux_setting sx150x_active_cfg = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+#ifdef CONFIG_USB_EHCI_MSM_HSIC
 static struct gpiomux_setting cyts_sleep_sus_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_6MA,
@@ -623,18 +689,21 @@ static struct msm_gpiomux_config cyts_gpio_configs[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_USB_EHCI_MSM_HSIC
 static struct gpiomux_setting hsic_act_cfg = {
-        .func = GPIOMUX_FUNC_1,
-        .drv = GPIOMUX_DRV_8MA,
-        .pull = GPIOMUX_PULL_NONE,
+	.func = GPIOMUX_FUNC_1,
+#ifdef CONFIG_USB_G_LGE_ANDROID
+	.drv = GPIOMUX_DRV_10MA,
+#else
+	.drv = GPIOMUX_DRV_8MA,
+#endif
+	.pull = GPIOMUX_PULL_NONE,
 };
 
 static struct gpiomux_setting hsic_sus_cfg = {
-        .func = GPIOMUX_FUNC_GPIO,
-        .drv = GPIOMUX_DRV_2MA,
-        .pull = GPIOMUX_PULL_DOWN,
-        .dir = GPIOMUX_OUT_LOW,
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_OUT_LOW,
 };
 
 static struct gpiomux_setting hsic_wakeup_act_cfg = {
@@ -923,7 +992,7 @@ static struct msm_gpiomux_config apq8064_gsbi_configs[] __initdata = {
 	},
 #endif /* LGE Not Used */
 /* #ifdef CONFIG_LGE_FELICA_KDDI */
-#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_LGE_FELICA_DCM)
+#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_LGE_FELICA_DCM) || defined(CONFIG_CXD2235AGG_GJ_KDDI)
     /* FELICA PON */
 	{
 		.gpio = 37,
@@ -955,7 +1024,7 @@ static struct msm_gpiomux_config apq8064_gsbi_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &felica_lockcont_cfg,
 		},
 	},
-#if defined(CONFIG_LGE_FELICA_KDDI)
+#if defined(CONFIG_LGE_FELICA_KDDI) || defined(CONFIG_CXD2235AGG_GJ_KDDI)
     /* NFC HSEL */
 	{
 		.gpio = 57,
@@ -1040,6 +1109,25 @@ static struct msm_gpiomux_config mpq8064_spkr_i2s_config[] __initdata = {
 	},
 };
 
+#ifdef CONFIG_LGE_IRRC
+static struct msm_gpiomux_config apq8064_irrc_configs[] __initdata = {
+       {
+              .gpio = 82,
+              .settings ={
+                     [GPIOMUX_ACTIVE] = &gsbi7_irrc_TXD,
+                     [GPIOMUX_SUSPENDED] = &gsbi7_irrc_TXD,
+              },
+       },
+       {
+              .gpio = 83,
+              .settings = {
+                     [GPIOMUX_ACTIVE] = &gsbi7_irrc_RXD,
+                     [GPIOMUX_SUSPENDED] = &gsbi7_irrc_RXD,
+              },
+       },
+};
+#endif
+
 static struct msm_gpiomux_config apq8064_audio_codec_configs[] __initdata = {
 	{
 		.gpio = 38,
@@ -1091,7 +1179,6 @@ static struct gpiomux_setting mdm2ap_pblrdy = {
 	.pull = GPIOMUX_PULL_DOWN,
 };
 
-
 static struct gpiomux_setting ap2mdm_soft_reset_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_8MA,
@@ -1116,7 +1203,6 @@ static struct msm_gpiomux_config mdm_configs[] __initdata = {
 	{
 		.gpio = 49,
 		.settings = {
-			[GPIOMUX_ACTIVE] = &mdm2ap_status_cfg,
 			[GPIOMUX_SUSPENDED] = &mdm2ap_status_cfg,
 		}
 	},
@@ -1158,68 +1244,69 @@ static struct msm_gpiomux_config mdm_configs[] __initdata = {
 };
 
 static struct gpiomux_setting mi2s_act_cfg = {
-        .func = GPIOMUX_FUNC_1,
-        .drv = GPIOMUX_DRV_8MA,
-        .pull = GPIOMUX_PULL_NONE,
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
 };
 
 static struct gpiomux_setting mi2s_sus_cfg = {
-        .func = GPIOMUX_FUNC_GPIO,
-        .drv = GPIOMUX_DRV_2MA,
-        .pull = GPIOMUX_PULL_DOWN,
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
 };
+
 static struct msm_gpiomux_config mpq8064_mi2s_configs[] __initdata = {
-        {
-                .gpio   = 27,           /* mi2s ws */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
-        {
-                .gpio   = 28,           /* mi2s sclk */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
-        {
-                .gpio   = 29,           /* mi2s dout3 */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
-        {
-                .gpio   = 30,           /* mi2s dout2 */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
+	{
+		.gpio	= 27,		/* mi2s ws */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
+	{
+		.gpio	= 28,		/* mi2s sclk */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
+	{
+		.gpio	= 29,		/* mi2s dout3 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
+	{
+		.gpio	= 30,		/* mi2s dout2 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
 
-        {
-                .gpio   = 31,           /* mi2s dout1 */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
-        {
-                .gpio   = 32,           /* mi2s dout0 */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
+	{
+		.gpio	= 31,		/* mi2s dout1 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
+	{
+		.gpio	= 32,		/* mi2s dout0 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
 
-        {
-                .gpio   = 33,           /* mi2s mclk */
-                .settings = {
-                        [GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
-                        [GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
-                },
-        },
+	{
+		.gpio	= 33,		/* mi2s mclk */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &mi2s_act_cfg,
+			[GPIOMUX_SUSPENDED] = &mi2s_sus_cfg,
+		},
+	},
 };
 static struct msm_gpiomux_config apq8064_mxt_configs[] __initdata = {
 	{	/* TS INTERRUPT */
@@ -1297,36 +1384,180 @@ static struct msm_gpiomux_config mpq8064_gsbi5_i2c_configs[] __initdata = {
 #endif /* CONFIG_MACH_LGE */
 
 static struct gpiomux_setting ir_suspended_cfg = {
-        .func = GPIOMUX_FUNC_GPIO,
-        .drv = GPIOMUX_DRV_2MA,
-        .pull = GPIOMUX_PULL_UP,
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
 };
 
 static struct gpiomux_setting ir_active_cfg = {
-        .func = GPIOMUX_FUNC_GPIO,
-        .drv = GPIOMUX_DRV_8MA,
-        .pull = GPIOMUX_PULL_UP,
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
 };
 
 static struct msm_gpiomux_config mpq8064_ir_configs[] __initdata = {
-        {
-                .gpio      = 88,                        /* GPIO IR */
-                .settings = {
-                        [GPIOMUX_SUSPENDED] = &ir_suspended_cfg,
-                        [GPIOMUX_ACTIVE] = &ir_active_cfg,
-                },
-        },
+	{
+		.gpio      = 88,			/* GPIO IR */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &ir_suspended_cfg,
+			[GPIOMUX_ACTIVE] = &ir_active_cfg,
+		},
+	},
 };
 
 static struct msm_gpiomux_config sx150x_int_configs[] __initdata = {
-        {
-                .gpio      = 81,
-                .settings = {
-                        [GPIOMUX_SUSPENDED] = &sx150x_suspended_cfg,
-                        [GPIOMUX_ACTIVE] = &sx150x_active_cfg,
-                },
-        },
+	{
+		.gpio      = 81,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &sx150x_suspended_cfg,
+			[GPIOMUX_ACTIVE] = &sx150x_active_cfg,
+		},
+	},
 };
+
+#ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+static struct gpiomux_setting sdc2_clk_active_cfg = {
+	.func = GPIOMUX_FUNC_2,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting sdc2_cmd_data_0_3_active_cfg = {
+	.func = GPIOMUX_FUNC_2,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting sdc2_suspended_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting sdc2_data_1_suspended_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct msm_gpiomux_config apq8064_sdc2_configs[] __initdata = {
+	{
+		.gpio      = 59,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_clk_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 57,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 62,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 61,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_data_1_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 60,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 58,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc2_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc2_suspended_cfg,
+		},
+	},
+};
+#endif
+
+
+#ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
+static struct gpiomux_setting sdc4_clk_active_cfg = {
+	.func = GPIOMUX_FUNC_2,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting sdc4_cmd_data_0_3_active_cfg = {
+	.func = GPIOMUX_FUNC_2,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting sdc4_suspended_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting sdc4_data_1_suspended_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct msm_gpiomux_config apq8064_sdc4_configs[] __initdata = {
+	{
+		.gpio      = 68,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_clk_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 67,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_suspended_cfg,
+		},
+
+	},
+	{
+		.gpio      = 66,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 65,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_data_1_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 64,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_suspended_cfg,
+		},
+	},
+	{
+		.gpio      = 63,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &sdc4_cmd_data_0_3_active_cfg,
+			[GPIOMUX_SUSPENDED] = &sdc4_suspended_cfg,
+		},
+	},
+};
+#endif
 
 static struct gpiomux_setting apq8064_sdc3_card_det_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -1345,9 +1576,9 @@ static struct msm_gpiomux_config apq8064_sdc3_configs[] __initdata = {
 };
 
 /* #ifndef CONFIG_LGE_FELICA_KDDI */
-#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM)
+#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM) && !defined(CONFIG_CXD2235AGG_GJ_KDDI)
 /* ehee.lee@lge.com [START] for NFC */
-#if defined(CONFIG_LGE_NFC_PN544)
+#if defined(CONFIG_LGE_NFC)
 static struct gpiomux_setting nfc_pn544_ven_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
@@ -1373,8 +1604,8 @@ static struct gpiomux_setting nfc_pn544_firm_cfg = {
 #endif//endif of CONFIG_LGE_FELICA_KDDI, CONFIG_LGE_FELICA_DCM
 /* ehee.lee@lge.com [START] for NFC */
 /* #ifndef CONFIG_LGE_FELICA_KDDI */
-#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM)
-#if defined(CONFIG_LGE_NFC_PN544)
+#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM) && !defined(CONFIG_CXD2235AGG_GJ_KDDI)
+#if defined(CONFIG_LGE_NFC)
 static struct msm_gpiomux_config apq8064_nfc_configs[] __initdata = {
 	{
 		.gpio = 37,
@@ -1423,8 +1654,8 @@ void __init apq8064_init_gpiomux(void)
 		msm_gpiomux_install(vcap_configs,
 				ARRAY_SIZE(vcap_configs));
 #endif
-                msm_gpiomux_install(sx150x_int_configs,
-                                ARRAY_SIZE(sx150x_int_configs));
+		msm_gpiomux_install(sx150x_int_configs,
+				ARRAY_SIZE(sx150x_int_configs));
 	} else {
 #if !defined(CONFIG_MACH_LGE)
 		#if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
@@ -1442,6 +1673,11 @@ void __init apq8064_init_gpiomux(void)
 	msm_gpiomux_install(apq8064_slimbus_config,
 			ARRAY_SIZE(apq8064_slimbus_config));
 
+#ifdef CONFIG_LGE_IRRC
+       msm_gpiomux_install(apq8064_irrc_configs,
+                     ARRAY_SIZE(apq8064_irrc_configs));
+       pr_debug("[IRRC] gpiomux_install");
+#endif
 	msm_gpiomux_install(apq8064_audio_codec_configs,
 			ARRAY_SIZE(apq8064_audio_codec_configs));
 
@@ -1455,15 +1691,16 @@ void __init apq8064_init_gpiomux(void)
 		" as audio is not the primary user"
 		" for these GPIO Pins\n", __func__);
 
-        if (machine_is_mpq8064_cdp() || machine_is_mpq8064_hrd() ||
-                machine_is_mpq8064_dtv())
-                msm_gpiomux_install(mpq8064_mi2s_configs,
-                        ARRAY_SIZE(mpq8064_mi2s_configs));
+	if (machine_is_mpq8064_cdp() || machine_is_mpq8064_hrd() ||
+		machine_is_mpq8064_dtv())
+		msm_gpiomux_install(mpq8064_mi2s_configs,
+			ARRAY_SIZE(mpq8064_mi2s_configs));
 
 #if !defined(CONFIG_MACH_LGE)
 	msm_gpiomux_install(apq8064_ext_regulator_configs,
 			ARRAY_SIZE(apq8064_ext_regulator_configs));
 #endif
+
 	if (machine_is_apq8064_mtp())
 		msm_gpiomux_install(mdm_configs,
 			ARRAY_SIZE(mdm_configs));
@@ -1478,9 +1715,9 @@ void __init apq8064_init_gpiomux(void)
 				ARRAY_SIZE(apq8064_hsic_configs));
 #endif
 /* #ifndef CONFIG_LGE_FELICA_KDDI */
-#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM)
+#if !defined(CONFIG_LGE_FELICA_KDDI) && !defined(CONFIG_LGE_FELICA_DCM) && !defined(CONFIG_CXD2235AGG_GJ_KDDI)
 /* ehee.lee@lge.com [START] for NFC */
-#if defined(CONFIG_LGE_NFC_PN544)
+#if defined(CONFIG_LGE_NFC)
 	msm_gpiomux_install(apq8064_nfc_configs,
 			ARRAY_SIZE(apq8064_nfc_configs));
 #endif
@@ -1494,9 +1731,19 @@ void __init apq8064_init_gpiomux(void)
 	msm_gpiomux_install(apq8064_hdmi_configs,
 			ARRAY_SIZE(apq8064_hdmi_configs));
 
-         if (machine_is_mpq8064_cdp())
-                msm_gpiomux_install(mpq8064_ir_configs,
-                                ARRAY_SIZE(mpq8064_ir_configs));
+	 if (machine_is_mpq8064_cdp())
+		msm_gpiomux_install(mpq8064_ir_configs,
+				ARRAY_SIZE(mpq8064_ir_configs));
+
+#ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+	 msm_gpiomux_install(apq8064_sdc2_configs,
+			     ARRAY_SIZE(apq8064_sdc2_configs));
+#endif
+
+#ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
+	 msm_gpiomux_install(apq8064_sdc4_configs,
+			     ARRAY_SIZE(apq8064_sdc4_configs));
+#endif
 
 	msm_gpiomux_install(apq8064_sdc3_configs,
 			ARRAY_SIZE(apq8064_sdc3_configs));

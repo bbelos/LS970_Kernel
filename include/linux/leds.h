@@ -17,10 +17,6 @@
 #include <linux/rwsem.h>
 #include <linux/timer.h>
 
-#if !defined(CONFIG_MACH_APQ8064_J1D)|| !defined(CONFIG_MACH_APQ8064_J1KD)
-#define LGE_PWM_LED	1
-#endif
-
 struct device;
 /*
  * LED Core

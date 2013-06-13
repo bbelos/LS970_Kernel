@@ -163,8 +163,6 @@ config IP_PNP_RARP
 	  operating on your network. Read
 	  <file:Documentation/filesystems/nfs/nfsroot.txt> for details.
 
-# not yet ready..
-#   bool '    IP: ARP support' CONFIG_IP_PNP_ARP
 config NET_IPIP
 	tristate "IP: tunneling"
 	select INET_TUNNEL
@@ -409,6 +407,14 @@ config INET_TCP_DIAG
 	depends on INET_DIAG
 	def_tristate INET_DIAG
 
+config INET_UDP_DIAG
+	tristate "UDP: socket monitoring interface"
+	depends on INET_DIAG && (IPV6 || IPV6=n)
+	default n
+	---help---
+	  Support for UDP socket monitoring interface used by the ss tool.
+	  If unsure, say Y.
+
 menuconfig TCP_CONG_ADVANCED
 	bool "TCP: advanced congestion control"
 	---help---
@@ -563,10 +569,7 @@ config TCP_CONG_ILLINOIS
 
 choice
 	prompt "Default TCP congestion control"
-	# LGE_CHANGE_S, [LGE_DATA][TCP_Congestion_Control_BIC], y01.jeong@lge.com, 2012-03-05
-	# default DEFAULT_CUBIC
-	default DEFAULT_BIC
-	# LGE_CHANGE_E, [LGE_DATA][TCP_Congestion_Control_BIC], y01.jeong@lge.com, 2012-03-05
+	default DEFAULT_CUBIC
 	help
 	  Select the TCP congestion control that will be used by default
 	  for all connections.

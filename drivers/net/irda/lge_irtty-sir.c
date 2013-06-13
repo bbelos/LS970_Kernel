@@ -1,10 +1,10 @@
 /*********************************************************************
- *                
+ *
  * Filename:      lge_irtty-sir.c
  * Version:       2.0
  * Description:   please refer to irtty-sir.c
- *     
- ********************************************************************/    
+ *
+ ********************************************************************/
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -130,7 +130,7 @@ static void irtty_wait_until_sent(struct sir_dev *dev)
 	}
 }
 
-/* 
+/*
  *  Function irtty_change_speed (dev, speed)
  *
  *    Change the speed of the serial port.
@@ -228,13 +228,13 @@ static int irtty_do_write(struct sir_dev *dev, const unsigned char *ptr, size_t 
 
 /* irda line discipline callbacks */
 
-/* 
+/*
  *  Function irtty_receive_buf( tty, cp, count)
  *
  *    Handle the 'receiver data ready' interrupt.  This function is called
  *    by the 'tty_io' module in the kernel when a block of IrDA data has
  *    been received, which can now be decapsulated and delivered for
- *    further processing 
+ *    further processing
  *
  * calling context depends on underlying driver and tty->low_latency!
  * for example (low_latency: 1 / 0):
@@ -243,7 +243,7 @@ static int irtty_do_write(struct sir_dev *dev, const unsigned char *ptr, size_t 
  */
 
 static void irtty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
-			      char *fp, int count) 
+			      char *fp, int count)
 {
 	struct sir_dev *dev;
 	struct sirtty_cb *priv = tty->disc_data;
@@ -287,10 +287,10 @@ static void irtty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	}
 
 	for (i = 0; i < count; i++) {
-		/* 
+		/*
 		 *  Characters received with a parity error, etc?
 		 */
- 		if (fp && *fp++) { 
+ 		if (fp && *fp++) {
 			IRDA_DEBUG(0, "Framing or parity error!\n");
 			sirdev_receive(dev, NULL, 0);	/* notify sir_dev (updating stats) */
 			return;
@@ -307,7 +307,7 @@ static void irtty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
  *    more packets to send, we send them here.
  *
  */
-static void irtty_write_wakeup(struct tty_struct *tty) 
+static void irtty_write_wakeup(struct tty_struct *tty)
 {
 	struct sirtty_cb *priv = tty->disc_data;
 	IRDA_ASSERT(priv != NULL, return;);
@@ -332,7 +332,7 @@ static inline void irtty_stop_receiver(struct tty_struct *tty, int stop)
 	mutex_lock(&tty->termios_mutex);
 	old_termios = *(tty->termios);
 	cflag = tty->termios->c_cflag;
-	
+
 	if (stop)
 		cflag &= ~CREAD;
 	else
@@ -447,7 +447,7 @@ static int irtty_ioctl(struct tty_struct *tty, struct file *file, unsigned int c
 	case IRTTY_IOCGET:
 		IRDA_ASSERT(dev->netdev != NULL, return -1;);
 
-		memset(&info, 0, sizeof(info)); 
+		memset(&info, 0, sizeof(info));
 		strncpy(info.name, dev->netdev->name, sizeof(info.name)-1);
 
 		if (copy_to_user((void __user *)arg, &info, sizeof(info))) {
@@ -513,14 +513,14 @@ write_proc_failed:
 	return ret;
 }
 #endif /* CONFIG_LGE_IRDA_FACTORY */
-/* 
+/*
  *  Function irtty_open(tty)
  *
  *    This function is called by the TTY module when the IrDA line
  *    discipline is called for.  Because we are sure the tty line exists,
- *    we only have to link it to a free IrDA channel.  
+ *    we only have to link it to a free IrDA channel.
  */
-static int irtty_open(struct tty_struct *tty) 
+static int irtty_open(struct tty_struct *tty)
 {
 	struct sir_dev *dev;
 	struct sirtty_cb *priv;
@@ -543,7 +543,7 @@ static int irtty_open(struct tty_struct *tty)
 		tty->ops->stop(tty);
 
 	tty_driver_flush_buffer(tty);
-	
+
 	/* apply mtt override */
 	sir_tty_drv.qos_mtt_bits = qos_mtt_bits;
 
@@ -578,7 +578,9 @@ static int irtty_open(struct tty_struct *tty)
 	 * prior to transfering any data
 	 */
 	gpio_set_value_cansleep(GPIO_IRDA_PWDN, GPIO_IRDA_PWDN_ENABLE);
+#if !defined(CONFIG_MACH_APQ8064_GVDCM)
 	gpio_set_value_cansleep(GPIO_IRDA_SW_EN, GPIO_IRDA_SW_EN_ENABLE);
+#endif
 
 #ifdef CONFIG_LGE_IRDA_FACTORY
 	_dev = dev;
@@ -591,14 +593,14 @@ out:
 	return ret;
 }
 
-/* 
+/*
  *  Function irtty_close (tty)
  *
  *    Close down a IrDA channel. This means flushing out any pending queues,
  *    and then restoring the TTY line discipline to what it was before it got
- *    hooked to IrDA (which usually is TTY again).  
+ *    hooked to IrDA (which usually is TTY again).
  */
-static void irtty_close(struct tty_struct *tty) 
+static void irtty_close(struct tty_struct *tty)
 {
 	struct sirtty_cb *priv = tty->disc_data;
 
@@ -637,7 +639,9 @@ static void irtty_close(struct tty_struct *tty)
 	/* we must switch on IrDA HW module & Level shifter
 	 * prior to transfering any data
 	 */
+#if !defined(CONFIG_MACH_APQ8064_GVDCM)
 	gpio_set_value_cansleep(GPIO_IRDA_SW_EN, GPIO_IRDA_SW_EN_DISABLE);
+#endif
 	gpio_set_value_cansleep(GPIO_IRDA_PWDN, GPIO_IRDA_PWDN_DISABLE);
 
 #ifdef CONFIG_LGE_IRDA_FACTORY
@@ -671,6 +675,7 @@ static int __init irtty_sir_init(void)
 #ifdef CONFIG_LGE_IRDA_FACTORY
 	struct proc_dir_entry *d_entry;
 #endif
+	printk("%s\n", __FUNCTION__);
 	if ((err = tty_register_ldisc(N_IRDA, &irda_ldisc)) != 0)
 		IRDA_ERROR("IrDA: can't register line discipline (err = %d)\n",
 			   err);
@@ -678,10 +683,12 @@ static int __init irtty_sir_init(void)
 	 * prior to transfering any data
 	 */
 
+#if !defined(CONFIG_MACH_APQ8064_GVDCM)
 	if((err = gpio_request_one(GPIO_IRDA_SW_EN, GPIOF_OUT_INIT_LOW, "IrDA_SW_EN")) != 0) {
 		IRDA_DEBUG(4, "%s : level shifter open error\n", __func__);
 		return err;
 	}
+#endif
 	if((err = gpio_request_one(GPIO_IRDA_PWDN, GPIOF_OUT_INIT_HIGH, "IrDA_PWDN")) != 0) {
 		IRDA_DEBUG(4, "%s : irda HW module open error\n", __func__);
 		return err;
@@ -704,11 +711,13 @@ static int __init irtty_sir_init(void)
 	return err;
 }
 
-static void __exit irtty_sir_cleanup(void) 
+static void __exit irtty_sir_cleanup(void)
 {
 	int err;
-
+	printk("%s\n", __FUNCTION__);
+#if !defined(CONFIG_MACH_APQ8064_GVDCM)
 	gpio_free(GPIO_IRDA_SW_EN);
+#endif
 	gpio_free(GPIO_IRDA_PWDN);
 
 	if ((err = tty_unregister_ldisc(N_IRDA))) {

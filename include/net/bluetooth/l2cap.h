@@ -661,7 +661,7 @@ struct l2cap_pinfo {
 				(pi)->tx_win_max + 1 - (y) + (x))
 #define __next_seq(x, pi) ((x + 1) & ((pi)->tx_win_max))
 
-extern int disable_ertm;
+extern bool disable_ertm;
 extern const struct proto_ops l2cap_sock_ops;
 extern struct bt_sock_list l2cap_sk_list;
 

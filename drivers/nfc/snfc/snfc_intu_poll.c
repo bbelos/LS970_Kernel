@@ -41,17 +41,14 @@ int intu_sig;
 
 static irqreturn_t snfc_int_low_isr(int irq, void *dev_id)
 {
-	#ifdef FEATURE_DEBUG_LOW
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_int_low_isr - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_int_low_isr - start \n");
 	disable_irq_nosync(gpio_to_irq(GPIO_SNFC_INTU));
 	disable_irq_wake(gpio_to_irq(GPIO_SNFC_INTU));  
 	/* Wake up waiting readers */
 	wake_up(&intuwq);
 	intu_sig = 1;
-	#ifdef FEATURE_DEBUG_LOW
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_int_low_isr - end \n");
-	#endif
+
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_int_low_isr - end \n");
 
 	return IRQ_HANDLED;
 }
@@ -62,9 +59,7 @@ static int snfc_intu_poll_open (struct inode *inode, struct file *fp)
 
 	if(isopen_snfcintu == 1)
 	{
-		#ifdef FEATURE_DEBUG_LOW 
 		SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_open - already open \n");
-		#endif
 		return 0;
 	}
 
@@ -75,7 +70,7 @@ static int snfc_intu_poll_open (struct inode *inode, struct file *fp)
 	{
 		SNFC_DEBUG_MSG("[snfc_intu_poll] gpio_request snfc_intu fail\n");
 	}
-	SNFC_DEBUG_MSG("[snfc_intu_poll] GPIO_SNFC_INTU =%d, gpio_to_irq(GPIO_SNFC_INTU) =%d\n",GPIO_SNFC_INTU, MSM_GPIO_TO_INT(GPIO_SNFC_INTU));
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] GPIO_SNFC_INTU =%d, gpio_to_irq(GPIO_SNFC_INTU) =%d\n",GPIO_SNFC_INTU, MSM_GPIO_TO_INT(GPIO_SNFC_INTU));
 
 	rc = gpio_direction_input((unsigned)GPIO_SNFC_INTU);
 	if(rc)
@@ -83,7 +78,7 @@ static int snfc_intu_poll_open (struct inode *inode, struct file *fp)
 		SNFC_DEBUG_MSG("[snfc] ERROR -  gpio_direction_input \n");
 		return rc;
 	}
-	SNFC_DEBUG_MSG("[snfc] set gpio %d input \n",GPIO_SNFC_INTU );	
+	SNFC_DEBUG_MSG_LOW("[snfc] set gpio %d input \n",GPIO_SNFC_INTU );	
 
 	 rc = request_irq(gpio_to_irq(GPIO_SNFC_INTU), snfc_int_low_isr,IRQF_TRIGGER_FALLING | IRQF_DISABLED , "snfc_intu", NULL);
 	 if (rc)
@@ -94,9 +89,7 @@ static int snfc_intu_poll_open (struct inode *inode, struct file *fp)
 
 	disable_irq_nosync(gpio_to_irq(GPIO_SNFC_INTU));
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_open - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_poll_open - end \n");
 	isopen_snfcintu = 1;
 	
 	return rc;
@@ -114,9 +107,7 @@ static ssize_t snfc_intu_read(struct file *pf, char *pbuf, size_t size, loff_t *
 	//int new_intu_status = GPIO_LOW_VALUE;
 	int return_val;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_read - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_read - start \n");
 
 	/* Parameters check*/
 	if(pf == NULL || pbuf == NULL || size == !1 /*|| pos == NULL*/) //need to know meaning of pos, size is fixed to 1
@@ -127,12 +118,12 @@ static ssize_t snfc_intu_read(struct file *pf, char *pbuf, size_t size, loff_t *
 
 	/* Get intu status */
 	current_intu_status = snfc_gpio_read(GPIO_SNFC_INTU);
-	SNFC_DEBUG_MSG("[snfc_intu_poll] current intu value is %d",current_intu_status);
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] current intu value is %d",current_intu_status);
 
 	intu_sig=0;
 	enable_irq_wake(gpio_to_irq(GPIO_SNFC_INTU));
 	enable_irq(gpio_to_irq(GPIO_SNFC_INTU));
-	SNFC_DEBUG_MSG("enable_irq intu irq");
+	SNFC_DEBUG_MSG_LOW("enable_irq intu irq");
 	
 	rc = wait_event_interruptible(intuwq,intu_sig);	
 
@@ -147,7 +138,7 @@ static ssize_t snfc_intu_read(struct file *pf, char *pbuf, size_t size, loff_t *
 
 	intu_sig=0;
 	
-	SNFC_DEBUG_MSG("snfc_intu_poll] wait_event_interruptible(),rc =%d !!!\n",rc);
+	SNFC_DEBUG_MSG_LOW("snfc_intu_poll] wait_event_interruptible(),rc =%d !!!\n",rc);
 
 	//current_intu_status = snfc_gpio_read(GPIO_SNFC_INTU);
 
@@ -158,9 +149,7 @@ static ssize_t snfc_intu_read(struct file *pf, char *pbuf, size_t size, loff_t *
 		return rc;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_read - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_read - end \n");
 
 	return size;
 }
@@ -172,9 +161,7 @@ static ssize_t snfc_intu_read(struct file *pf, char *pbuf, size_t size, loff_t *
  */
 static int snfc_intu_release (struct inode *inode, struct file *fp)
 {
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] felica_rfs_release - start \n");	
-	#endif	
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] felica_rfs_release - start \n");	
 	if(isopen_snfcintu == 0)
 	{
 		#ifdef FEATURE_DEBUG_LOW 
@@ -186,9 +173,7 @@ static int snfc_intu_release (struct inode *inode, struct file *fp)
 	free_irq(gpio_to_irq(GPIO_SNFC_INTU), NULL);
 
 	isopen_snfcintu = 0;
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_release - end \n");
-	#endif		
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_release - end \n");
 
 	return 0;
 }
@@ -210,9 +195,7 @@ static int snfc_intu_init(void)
 {
 	int rc;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_init - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_poll_init - start \n");
 
 	/* register the device file */
 	rc = misc_register(&snfc_intu_device);
@@ -222,25 +205,19 @@ static int snfc_intu_init(void)
 		return rc;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_init - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_poll_init - end \n");
 
 	return 0;
 }
 
 static void snfc_intu_exit(void)
 {
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_exit - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_poll_exit - start \n");
 
 	/* deregister the device file */
 	misc_deregister(&snfc_intu_device);
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_intu_poll] snfc_intu_poll_exit - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_intu_poll] snfc_intu_poll_exit - end \n");
 }
 
 module_init(snfc_intu_init);

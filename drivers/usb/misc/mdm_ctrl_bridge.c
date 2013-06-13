@@ -25,9 +25,6 @@
 #include <linux/termios.h>
 #include <asm/unaligned.h>
 #include <mach/usb_bridge.h>
-#ifdef CONFIG_LGE_EMS_CH
-#include <mach/hsic_debug_ch.h>
-#endif
 
 static const char *ctrl_bridge_names[] = {
 	"dun_ctrl_hsic0",
@@ -323,7 +320,6 @@ void ctrl_bridge_close(unsigned int id)
 	dev_dbg(&dev->intf->dev, "%s:\n", __func__);
 
 	ctrl_bridge_set_cbits(dev->brdg->ch_id, 0);
-	usb_unlink_anchored_urbs(&dev->tx_submitted);
 
 	dev->brdg = NULL;
 }
@@ -407,7 +403,7 @@ int ctrl_bridge_write(unsigned int id, char *data, size_t size)
 
 	result = usb_autopm_get_interface_async(dev->intf);
 	if (result < 0) {
-		dev_err(&dev->intf->dev, "%s: unable to resume interface: %d\n",
+		dev_dbg(&dev->intf->dev, "%s: unable to resume interface: %d\n",
 			__func__, result);
 
 		/*
@@ -731,6 +727,8 @@ void ctrl_bridge_disconnect(unsigned int id)
 	dev_dbg(&dev->intf->dev, "%s:\n", __func__);
 
 	platform_device_unregister(dev->pdev);
+
+	usb_unlink_anchored_urbs(&dev->tx_submitted);
 
 	kfree(dev->in_ctlreq);
 	kfree(dev->readbuf);

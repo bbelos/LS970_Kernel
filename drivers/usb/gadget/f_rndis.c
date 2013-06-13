@@ -5,35 +5,30 @@
  * Copyright (C) 2003-2004 Robert Schwebel, Benedikt Spranger
  * Copyright (C) 2008 Nokia Corporation
  * Copyright (C) 2009 Samsung Electronics
- *                    Author: Michal Nazarewicz (m.nazarewicz@samsung.com)
+ *                    Author: Michal Nazarewicz (mina86@mina86.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 /* #define VERBOSE_DEBUG */
 
 #include <linux/slab.h>
 #include <linux/kernel.h>
-#include <linux/platform_device.h>
+#include <linux/device.h>
 #include <linux/etherdevice.h>
 
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 #include "u_ether.h"
 #include "rndis.h"
 
+static bool rndis_multipacket_dl_disable;
+module_param(rndis_multipacket_dl_disable, bool, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(rndis_multipacket_dl_disable,
+	"Disable RNDIS Multi-packet support in DownLink");
 
 /*
  * This function is an RNDIS Ethernet port -- a Microsoft protocol that's
@@ -97,10 +92,12 @@ static inline struct f_rndis *func_to_rndis(struct usb_function *f)
 /* peak (theoretical) bulk transfer rate in bits-per-second */
 static unsigned int bitrate(struct usb_gadget *g)
 {
-	if (gadget_is_dualspeed(g) && g->speed == USB_SPEED_HIGH)
+	if (gadget_is_superspeed(g) && g->speed == USB_SPEED_SUPER)
+		return 13 * 1024 * 8 * 1000 * 8;
+	else if (gadget_is_dualspeed(g) && g->speed == USB_SPEED_HIGH)
 		return 13 * 512 * 8 * 1000 * 8;
 	else
-		return 19 *  64 * 1 * 1000 * 8;
+		return 19 * 64 * 1 * 1000 * 8;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -179,11 +176,12 @@ static struct usb_interface_assoc_descriptor
 rndis_iad_descriptor = {
 	.bLength =		sizeof rndis_iad_descriptor,
 	.bDescriptorType =	USB_DT_INTERFACE_ASSOCIATION,
+
 	.bFirstInterface =	0, /* XXX, hardcoded */
 	.bInterfaceCount = 	2,	// control + data
 	.bFunctionClass =	USB_CLASS_COMM,
 	.bFunctionSubClass =	USB_CDC_SUBCLASS_ETHERNET,
-	.bFunctionProtocol =	USB_CDC_ACM_PROTO_VENDOR,
+	.bFunctionProtocol =	USB_CDC_PROTO_NONE,
 	/* .iFunction = DYNAMIC */
 };
 
@@ -217,6 +215,7 @@ static struct usb_endpoint_descriptor fs_out_desc = {
 
 static struct usb_descriptor_header *eth_fs_function[] = {
 	(struct usb_descriptor_header *) &rndis_iad_descriptor,
+
 	/* control interface matches ACM, not Ethernet */
 	(struct usb_descriptor_header *) &rndis_control_intf,
 	(struct usb_descriptor_header *) &header_desc,
@@ -224,6 +223,7 @@ static struct usb_descriptor_header *eth_fs_function[] = {
 	(struct usb_descriptor_header *) &rndis_acm_descriptor,
 	(struct usb_descriptor_header *) &rndis_union_desc,
 	(struct usb_descriptor_header *) &fs_notify_desc,
+
 	/* data interface has no altsetting */
 	(struct usb_descriptor_header *) &rndis_data_intf,
 	(struct usb_descriptor_header *) &fs_in_desc,
@@ -242,6 +242,7 @@ static struct usb_endpoint_descriptor hs_notify_desc = {
 	.wMaxPacketSize =	cpu_to_le16(STATUS_BYTECOUNT),
 	.bInterval =		LOG2_STATUS_INTERVAL_MSEC + 4,
 };
+
 static struct usb_endpoint_descriptor hs_in_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
@@ -262,6 +263,7 @@ static struct usb_endpoint_descriptor hs_out_desc = {
 
 static struct usb_descriptor_header *eth_hs_function[] = {
 	(struct usb_descriptor_header *) &rndis_iad_descriptor,
+
 	/* control interface matches ACM, not Ethernet */
 	(struct usb_descriptor_header *) &rndis_control_intf,
 	(struct usb_descriptor_header *) &header_desc,
@@ -269,10 +271,81 @@ static struct usb_descriptor_header *eth_hs_function[] = {
 	(struct usb_descriptor_header *) &rndis_acm_descriptor,
 	(struct usb_descriptor_header *) &rndis_union_desc,
 	(struct usb_descriptor_header *) &hs_notify_desc,
+
 	/* data interface has no altsetting */
 	(struct usb_descriptor_header *) &rndis_data_intf,
 	(struct usb_descriptor_header *) &hs_in_desc,
 	(struct usb_descriptor_header *) &hs_out_desc,
+	NULL,
+};
+
+/* super speed support: */
+
+static struct usb_endpoint_descriptor ss_notify_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+
+	.bEndpointAddress =	USB_DIR_IN,
+	.bmAttributes =		USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize =	cpu_to_le16(STATUS_BYTECOUNT),
+	.bInterval =		LOG2_STATUS_INTERVAL_MSEC + 4,
+};
+
+static struct usb_ss_ep_comp_descriptor ss_intr_comp_desc = {
+	.bLength =		sizeof ss_intr_comp_desc,
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 3 values can be tweaked if necessary */
+	/* .bMaxBurst =		0, */
+	/* .bmAttributes =	0, */
+	.wBytesPerInterval =	cpu_to_le16(STATUS_BYTECOUNT),
+};
+
+static struct usb_endpoint_descriptor ss_in_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+
+	.bEndpointAddress =	USB_DIR_IN,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_endpoint_descriptor ss_out_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+
+	.bEndpointAddress =	USB_DIR_OUT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor ss_bulk_comp_desc = {
+	.bLength =		sizeof ss_bulk_comp_desc,
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =		0, */
+	/* .bmAttributes =	0, */
+};
+
+static struct usb_descriptor_header *eth_ss_function[] = {
+	(struct usb_descriptor_header *) &rndis_iad_descriptor,
+
+	/* control interface matches ACM, not Ethernet */
+	(struct usb_descriptor_header *) &rndis_control_intf,
+	(struct usb_descriptor_header *) &header_desc,
+	(struct usb_descriptor_header *) &call_mgmt_descriptor,
+	(struct usb_descriptor_header *) &rndis_acm_descriptor,
+	(struct usb_descriptor_header *) &rndis_union_desc,
+	(struct usb_descriptor_header *) &ss_notify_desc,
+	(struct usb_descriptor_header *) &ss_intr_comp_desc,
+
+	/* data interface has no altsetting */
+	(struct usb_descriptor_header *) &rndis_data_intf,
+	(struct usb_descriptor_header *) &ss_in_desc,
+	(struct usb_descriptor_header *) &ss_bulk_comp_desc,
+	(struct usb_descriptor_header *) &ss_out_desc,
+	(struct usb_descriptor_header *) &ss_bulk_comp_desc,
 	NULL,
 };
 
@@ -400,6 +473,8 @@ static void rndis_command_complete(struct usb_ep *ep, struct usb_request *req)
 				__func__, buf->MaxTransferSize,
 				rndis->port.multi_pkt_xfer ? "enabled" :
 							    "disabled");
+		if (rndis_multipacket_dl_disable)
+			rndis->port.multi_pkt_xfer = 0;
 	}
 //	spin_unlock(&dev->lock);
 }
@@ -447,6 +522,7 @@ rndis_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 			if (buf) {
 				memcpy(req->buf, buf, n);
 				req->complete = rndis_response_complete;
+				req->context = rndis;
 				rndis_free_response(rndis->config, buf);
 				value = n;
 			}
@@ -685,8 +761,21 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 
 		/* copy descriptors, and track endpoint copies */
 		f->hs_descriptors = usb_copy_descriptors(eth_hs_function);
-
 		if (!f->hs_descriptors)
+			goto fail;
+	}
+
+	if (gadget_is_superspeed(c->cdev->gadget)) {
+		ss_in_desc.bEndpointAddress =
+				fs_in_desc.bEndpointAddress;
+		ss_out_desc.bEndpointAddress =
+				fs_out_desc.bEndpointAddress;
+		ss_notify_desc.bEndpointAddress =
+				fs_notify_desc.bEndpointAddress;
+
+		/* copy descriptors, and track endpoint copies */
+		f->ss_descriptors = usb_copy_descriptors(eth_ss_function);
+		if (!f->ss_descriptors)
 			goto fail;
 	}
 
@@ -701,9 +790,10 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	rndis_set_param_medium(rndis->config, NDIS_MEDIUM_802_3, 0);
 	rndis_set_host_mac(rndis->config, rndis->ethaddr);
 
-	if (rndis_set_param_vendor(rndis->config, rndis->vendorID,
-				   rndis->manufacturer))
-			goto fail;
+	if (rndis->manufacturer && rndis->vendorID &&
+			rndis_set_param_vendor(rndis->config, rndis->vendorID,
+					       rndis->manufacturer))
+		goto fail;
 
 	/* NOTE:  all that is done without knowing or caring about
 	 * the network link ... which is unavailable to this code
@@ -711,12 +801,15 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	 */
 
 	DBG(cdev, "RNDIS: %s speed IN/%s OUT/%s NOTIFY/%s\n",
+			gadget_is_superspeed(c->cdev->gadget) ? "super" :
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			rndis->port.in_ep->name, rndis->port.out_ep->name,
 			rndis->notify->name);
 	return 0;
 
 fail:
+	if (gadget_is_superspeed(c->cdev->gadget) && f->ss_descriptors)
+		usb_free_descriptors(f->ss_descriptors);
 	if (gadget_is_dualspeed(c->cdev->gadget) && f->hs_descriptors)
 		usb_free_descriptors(f->hs_descriptors);
 	if (f->descriptors)
@@ -747,7 +840,10 @@ rndis_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	rndis_deregister(rndis->config);
 	rndis_exit();
+	rndis_string_defs[0].id = 0;
 
+	if (gadget_is_superspeed(c->cdev->gadget))
+		usb_free_descriptors(f->ss_descriptors);
 	if (gadget_is_dualspeed(c->cdev->gadget))
 		usb_free_descriptors(f->hs_descriptors);
 	usb_free_descriptors(f->descriptors);
@@ -778,7 +874,13 @@ static inline bool can_support_rndis(struct usb_configuration *c)
  * for calling @gether_cleanup() before module unload.
  */
 int
-rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
+rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN])
+{
+	return rndis_bind_config_vendor(c, ethaddr, 0, NULL);
+}
+
+int
+rndis_bind_config_vendor(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
 				u32 vendorID, const char *manufacturer)
 {
 	struct f_rndis	*rndis;

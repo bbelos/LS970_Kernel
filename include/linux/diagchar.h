@@ -24,9 +24,10 @@
 #define MEMORY_DEVICE_MODE		2
 #define NO_LOGGING_MODE			3
 #define UART_MODE			4
+#define SOCKET_MODE			5
 
 #ifdef CONFIG_LGE_DM_APP
-#define DM_APP_MODE			5
+#define DM_APP_MODE			10
 #endif
 
 /* different values that go in for diag_data_type */
@@ -115,7 +116,7 @@ the appropriate macros. */
 #define EVENT_LAST_ID			0x08AD
 
 #define MSG_SSID_0			0
-#define MSG_SSID_0_LAST			91
+#define MSG_SSID_0_LAST			93
 #define MSG_SSID_1			500
 #define MSG_SSID_1_LAST			506
 #define MSG_SSID_2			1000
@@ -692,7 +693,7 @@ static const uint32_t msg_bld_masks_22[] = {
 /* LOG CODES */
 
 #define LOG_0	0x0
-#define LOG_1	0x15A7
+#define LOG_1	0x1636
 #define LOG_2	0x0
 #define LOG_3	0x0
 #define LOG_4	0x4910

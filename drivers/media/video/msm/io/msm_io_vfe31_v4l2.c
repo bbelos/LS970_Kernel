@@ -15,6 +15,7 @@
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/regulator/consumer.h>
+#include <linux/export.h>
 #include <mach/gpio.h>
 #include <mach/board.h>
 #include <mach/camera.h>
@@ -24,7 +25,7 @@
 #include <mach/msm_bus.h>
 #include <mach/msm_bus_board.h>
 
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 
 /* AXI rates in KHz */
 #define MSM_AXI_QOS_PREVIEW     192000

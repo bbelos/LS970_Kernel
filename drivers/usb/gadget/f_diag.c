@@ -18,9 +18,9 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/ratelimit.h>
 
 #include <mach/usbdiag.h>
-#include <mach/rpc_hsusb.h>
 
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget.h>
@@ -385,6 +385,7 @@ int usb_diag_read(struct usb_diag_ch *ch, struct diag_request *d_req)
 	struct diag_context *ctxt = ch->priv_usb;
 	unsigned long flags;
 	struct usb_request *req;
+	static DEFINE_RATELIMIT_STATE(rl, 10*HZ, 1);
 
 	if (!ctxt)
 		return -ENODEV;
@@ -414,7 +415,9 @@ int usb_diag_read(struct usb_diag_ch *ch, struct diag_request *d_req)
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->read_pool);
 		spin_unlock_irqrestore(&ctxt->lock, flags);
-		ERROR(ctxt->cdev, "%s: cannot queue"
+		/* 1 error message for every 10 sec */
+		if (__ratelimit(&rl))
+			ERROR(ctxt->cdev, "%s: cannot queue"
 				" read request\n", __func__);
 		return -EIO;
 	}
@@ -441,6 +444,7 @@ int usb_diag_write(struct usb_diag_ch *ch, struct diag_request *d_req)
 	struct diag_context *ctxt = ch->priv_usb;
 	unsigned long flags;
 	struct usb_request *req = NULL;
+	static DEFINE_RATELIMIT_STATE(rl, 10*HZ, 1);
 
 	if (!ctxt)
 		return -ENODEV;
@@ -470,7 +474,9 @@ int usb_diag_write(struct usb_diag_ch *ch, struct diag_request *d_req)
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->write_pool);
 		spin_unlock_irqrestore(&ctxt->lock, flags);
-		ERROR(ctxt->cdev, "%s: cannot queue"
+		/* 1 error message for every 10 sec */
+		if (__ratelimit(&rl))
+			ERROR(ctxt->cdev, "%s: cannot queue"
 				" read request\n", __func__);
 		return -EIO;
 	}
@@ -524,7 +530,6 @@ static int diag_function_set_alt(struct usb_function *f,
 	if (rc) {
 		ERROR(dev->cdev, "can't enable %s, result %d\n",
 						dev->in->name, rc);
-		dev->in->driver_data = NULL;
 		return rc;
 	}
 	dev->out->driver_data = dev;
@@ -533,8 +538,6 @@ static int diag_function_set_alt(struct usb_function *f,
 		ERROR(dev->cdev, "can't enable %s, result %d\n",
 						dev->out->name, rc);
 		usb_ep_disable(dev->in);
-		dev->in->driver_data = NULL;
-		dev->out->driver_data = NULL;
 		return rc;
 	}
 	schedule_work(&dev->config_work);

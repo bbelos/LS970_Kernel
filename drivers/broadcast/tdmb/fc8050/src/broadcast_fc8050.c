@@ -17,13 +17,13 @@
 #include "../inc/fci_types.h"
 #include "../inc/bbm.h"
 
-#include <linux/pm_qos_params.h>
+//#include <linux/pm_qos_params.h>
 
 #include <linux/err.h>
 #include <mach/msm_xo.h>
 
 //#include CONFIG_BOARD_HEADER_FILE
-#include "../../../../../arch/arm/mach-msm/lge/j1/board-j1.h"
+#include "../../../../../arch/arm/mach-msm/lge/gk/board-gk.h"
 /* external function */
 extern int broadcast_drv_if_isr(void);
 extern void fc8050_isr_control(fci_u8 onoff);
@@ -38,9 +38,6 @@ static int broadcast_tdmb_fc8050_resume(struct spi_device *spi);
 #define DMB_EN                        85
 #define DMB_INT_N                  77
 #define DMB_RESET_N            1
-#define DMB_ANT_SEL_P_EAR       	    PM8921_GPIO_PM_TO_SYS(11)
-#define DMB_ANT_SEL_N_INNER        PM8921_GPIO_PM_TO_SYS(12)  
-
 
 /* SPI Data read using workqueue */
 //#define FEATURE_DMB_USE_WORKQUEUE
@@ -61,7 +58,7 @@ struct tdmb_fc8050_ctrl_blk
 	struct wake_lock                        	wake_lock;	/* wake_lock,wake_unlock */
 	boolean                                         spi_irq_status;
 	spinlock_t                                     spin_lock;
-	struct pm_qos_request_list    pm_req_list;
+//	struct pm_qos_request_list    pm_req_list;
 };
 
 
@@ -188,14 +185,11 @@ int tdmb_fc8050_power_on(void)
 			return FALSE;
 		}
 
-		if(pm_qos_request_active(&fc8050_ctrl_info.pm_req_list)) {
+/*		if(pm_qos_request_active(&fc8050_ctrl_info.pm_req_list)) {
 			pm_qos_update_request(&fc8050_ctrl_info.pm_req_list, 20);
-		}
+		}*/
 
 		wake_lock(&fc8050_ctrl_info.wake_lock);
-
-		gpio_set_value_cansleep(DMB_ANT_SEL_P_EAR, 0);
-		gpio_set_value_cansleep(DMB_ANT_SEL_N_INNER, 1);
 
 		gpio_set_value(DMB_EN, 0);
 		gpio_set_value(DMB_RESET_N, 1);
@@ -227,7 +221,7 @@ int tdmb_fc8050_power_off(void)
 {
 	if ( fc8050_ctrl_info.TdmbPowerOnState == TRUE )
 	{
-
+		
 		tdmb_fc8050_interrupt_lock();
 
 		if(xo_handle_tdmb != NULL) {
@@ -239,13 +233,11 @@ int tdmb_fc8050_power_off(void)
 		gpio_set_value(DMB_RESET_N, 0);
 		gpio_set_value(DMB_EN, 0);
 
-		gpio_set_value_cansleep(DMB_ANT_SEL_P_EAR, 1);  // for ESD TEST
-		gpio_set_value_cansleep(DMB_ANT_SEL_N_INNER, 0);
 		wake_unlock(&fc8050_ctrl_info.wake_lock);
 
-		if(pm_qos_request_active(&fc8050_ctrl_info.pm_req_list)) {
+/*		if(pm_qos_request_active(&fc8050_ctrl_info.pm_req_list)) {
 			pm_qos_update_request(&fc8050_ctrl_info.pm_req_list, PM_QOS_DEFAULT_VALUE);	
-		}
+		}*/
 	}
 	else
 	{
@@ -258,26 +250,7 @@ int tdmb_fc8050_power_off(void)
 
 int tdmb_fc8050_select_antenna(unsigned int sel)
 {
-#if defined(CONFIG_MACH_APQ8064_GKKT)||defined(CONFIG_MACH_APQ8064_GKSK)||defined(CONFIG_MACH_APQ8064_GKU)
-	if(LGE_BROADCAST_TDMB_ANT_TYPE_INTENNA == sel)
-	{
-		gpio_set_value_cansleep(DMB_ANT_SEL_P_EAR, 0);
-		gpio_set_value_cansleep(DMB_ANT_SEL_N_INNER, 1);
-	}
-	else if(LGE_BROADCAST_TDMB_ANT_TYPE_EARANT == sel)
-	{
-		gpio_set_value_cansleep(DMB_ANT_SEL_P_EAR, 1);
-		gpio_set_value_cansleep(DMB_ANT_SEL_N_INNER, 0);
-	}
-	else
-	{
-		printk("fc8050_select_antenna is invalid value set = (%d)\n", sel);
-		return FALSE;
-	}
-	return TRUE;
-#else
 	return FALSE;
-#endif
 }
 
 static struct spi_driver broadcast_tdmb_driver = {
@@ -287,7 +260,7 @@ static struct spi_driver broadcast_tdmb_driver = {
 	.resume  = broadcast_tdmb_fc8050_resume,
 	.driver = {
 		.name = "tdmb_fc8050",
-		.bus = &spi_bus_type,
+		.bus	= &spi_bus_type,
 		.owner = THIS_MODULE,
 	},
 };
@@ -442,25 +415,9 @@ static int tdmb_configure_gpios(void)
 		printk("%s:Failed GPIO DMB_INT_N request!!!\n",__func__);
 	}
 
-
-	gpio_request(DMB_ANT_SEL_P_EAR, "DMB_ANT_SEL_P");
-	if (rc < 0) {
-		err_count++;
-		printk("%s:Failed GPIO DMB_ANT_SEL_P request!!!\n",__func__);
-	}
-
-	gpio_request(DMB_ANT_SEL_N_INNER, "DMB_ANT_SEL_N");
-	if (rc < 0) {
-		err_count++;
-		printk("%s:Failed GPIO DMB_ANT_SEL_N request!!!\n",__func__);
-	}
-
 	gpio_direction_output(DMB_RESET_N, 0);
 	gpio_direction_output(DMB_EN, 0);
 	gpio_direction_input(DMB_INT_N);
-
-	gpio_set_value_cansleep(DMB_ANT_SEL_P_EAR, 1); /*PMIC Extended GPIO */
-	gpio_set_value_cansleep(DMB_ANT_SEL_N_INNER, 0); /* PMIC Extended GPIO */
 
 	if(err_count > 0) rc = -EINVAL;
 
@@ -515,7 +472,7 @@ static int broadcast_tdmb_fc8050_probe(struct spi_device *spi)
 	
 	spin_lock_init(&fc8050_ctrl_info.spin_lock);
 
-	pm_qos_add_request(&fc8050_ctrl_info.pm_req_list, PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
+//	pm_qos_add_request(&fc8050_ctrl_info.pm_req_list, PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
 	
 	printk("broadcast_fc8050_probe End\n");
 
@@ -540,7 +497,7 @@ static int broadcast_tdmb_fc8050_remove(struct spi_device *spi)
 
 	wake_lock_destroy(&fc8050_ctrl_info.wake_lock);
 	
-	pm_qos_remove_request(&fc8050_ctrl_info.pm_req_list);
+//	pm_qos_remove_request(&fc8050_ctrl_info.pm_req_list);
 	memset((unsigned char*)&fc8050_ctrl_info, 0x0, sizeof(struct tdmb_fc8050_ctrl_blk));
 	return 0;
 }

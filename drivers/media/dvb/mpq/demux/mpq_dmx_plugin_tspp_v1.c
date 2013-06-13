@@ -47,22 +47,29 @@
 
 #define TSPP_RAW_TTS_SIZE				192
 
-/* Size of single descriptor.
- * Assuming 20MBit/sec stream, with 200 packets
- * per descriptor there would be about 68 descriptors.
- * Meanning about 68 interrupts per second.
+/* Size of single descriptor. Using max descriptor size (170 packets).
+ * Assuming 20MBit/sec stream, with 170 packets
+ * per descriptor there would be about 82 descriptors,
+ * Meanning about 82 notifications per second.
  */
-#define TSPP_BUFFER_SIZE			(TSPP_RAW_TTS_SIZE * 200)
+#define MAX_BAM_DESCRIPTOR_SIZE		(32*1024 - 1)
+#define TSPP_BUFFER_SIZE			\
+	((MAX_BAM_DESCRIPTOR_SIZE / TSPP_RAW_TTS_SIZE) * TSPP_RAW_TTS_SIZE)
 
 /* Number of descriptors, total size: TSPP_BUFFER_SIZE*TSPP_BUFFER_COUNT */
-#define TSPP_BUFFER_COUNT				(16)
+#define TSPP_BUFFER_COUNT				(32)
 
 /* When TSPP notifies demux that new packets are received */
-#define TSPP_NOTIFICATION_SIZE			(TSPP_RAW_TTS_SIZE * 100)
+#define TSPP_NOTIFICATION_SIZE			1
 
 /* Channel timeout in msec */
 #define TSPP_CHANNEL_TIMEOUT			16
 
+/* module parameters for load time configuration */
+static int tsif0_mode = TSPP_TSIF_MODE_2;
+static int tsif1_mode = TSPP_TSIF_MODE_2;
+module_param(tsif0_mode, int, S_IRUGO);
+module_param(tsif1_mode, int, S_IRUGO);
 
 /*
  * Work scheduled each time TSPP notifies dmx
@@ -232,7 +239,7 @@ static void mpq_dmx_tspp_work(struct work_struct *worker)
  * @channel_id: Channel with new TS packets
  * @user: user-data holding TSIF number
  */
-static void mpq_tspp_callback(u32 channel_id, void *user)
+static void mpq_tspp_callback(int channel_id, void *user)
 {
 	int tsif = (int)user;
 	struct work_struct *work;
@@ -264,21 +271,24 @@ static void mpq_tspp_callback(u32 channel_id, void *user)
  */
 static int mpq_tspp_dmx_add_channel(struct dvb_demux_feed *feed)
 {
-	struct mpq_demux *mpq_demux = (struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 	enum tspp_source tspp_source;
 	struct tspp_filter tspp_filter;
 	int tsif;
 	int ret;
 	int channel_id;
 	int *channel_ref_count;
+	enum tspp_tsif_mode mode;
 
 	/* determine the TSIF we are reading from */
 	if (mpq_demux->source == DMX_SOURCE_FRONT0) {
 		tsif = 0;
 		tspp_source = TSPP_SOURCE_TSIF0;
+		mode = (enum tspp_tsif_mode)tsif0_mode;
 	} else if (mpq_demux->source == DMX_SOURCE_FRONT1) {
 		tsif = 1;
 		tspp_source = TSPP_SOURCE_TSIF1;
+		mode = (enum tspp_tsif_mode)tsif1_mode;
 	} else {
 		/* invalid source */
 		MPQ_DVB_ERR_PRINT(
@@ -331,7 +341,7 @@ static int mpq_tspp_dmx_add_channel(struct dvb_demux_feed *feed)
 		}
 
 		/* set TSPP source */
-		ret = tspp_open_stream(0, channel_id, tspp_source);
+		ret = tspp_open_stream(0, channel_id, tspp_source, mode);
 		if (ret < 0) {
 			MPQ_DVB_ERR_PRINT(
 				"%s: tspp_select_source(%d,%d) failed (%d)\n",
@@ -455,7 +465,7 @@ static int mpq_tspp_dmx_remove_channel(struct dvb_demux_feed *feed)
 	int channel_id;
 	int *channel_ref_count;
 	struct tspp_filter tspp_filter;
-	struct mpq_demux *mpq_demux = (struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 
 	/* determine the TSIF we are reading from */
 	if (mpq_demux->source == DMX_SOURCE_FRONT0) {
@@ -559,8 +569,7 @@ remove_channel_failed:
 static int mpq_tspp_dmx_start_filtering(struct dvb_demux_feed *feed)
 {
 	int ret;
-	struct mpq_demux *mpq_demux =
-		(struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 
 	MPQ_DVB_DBG_PRINT(
 		"%s(%d) executed\n",
@@ -620,7 +629,7 @@ static int mpq_tspp_dmx_start_filtering(struct dvb_demux_feed *feed)
 static int mpq_tspp_dmx_stop_filtering(struct dvb_demux_feed *feed)
 {
 	int ret = 0;
-	struct mpq_demux *mpq_demux = (struct mpq_demux *)feed->demux->priv;
+	struct mpq_demux *mpq_demux = feed->demux->priv;
 
 	MPQ_DVB_DBG_PRINT(
 		"%s(%d) executed\n",
@@ -677,7 +686,7 @@ static int mpq_tspp_dmx_write_to_decoder(
 static int mpq_tspp_dmx_get_caps(struct dmx_demux *demux,
 				struct dmx_caps *caps)
 {
-	struct dvb_demux *dvb_demux = (struct dvb_demux *)demux->priv;
+	struct dvb_demux *dvb_demux = demux->priv;
 
 	if ((dvb_demux == NULL) || (caps == NULL)) {
 		MPQ_DVB_ERR_PRINT(
@@ -737,6 +746,9 @@ static int mpq_tspp_dmx_init(
 	mpq_demux->demux.decoder_fullness_abort =
 		mpq_dmx_decoder_fullness_abort;
 
+	mpq_demux->demux.decoder_buffer_status =
+		mpq_dmx_decoder_buffer_status;
+
 	/* Initialize dvb_demux object */
 	result = dvb_dmx_init(&mpq_demux->demux);
 	if (result < 0) {
@@ -750,7 +762,6 @@ static int mpq_tspp_dmx_init(
 	mpq_demux->dmxdev.capabilities =
 		DMXDEV_CAP_DUPLEX |
 		DMXDEV_CAP_PULL_MODE |
-		DMXDEV_CAP_PCR_EXTRACTION |
 		DMXDEV_CAP_INDEXING;
 
 	mpq_demux->dmxdev.demux->set_source = mpq_dmx_set_source;

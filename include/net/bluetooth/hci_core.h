@@ -191,6 +191,7 @@ struct hci_dev {
 	unsigned int	acl_pkts;
 	unsigned int	sco_pkts;
 	unsigned int	le_pkts;
+	unsigned int	le_white_list_size;
 
 	unsigned int	data_block_len;
 
@@ -354,9 +355,7 @@ struct hci_conn {
 	__u8		auth;
 	void		*smp_conn;
 	struct timer_list smp_timer;
-// +s LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 	__u8		conn_valid;
-// +e LGBT_COMMON_PATCH_00962598 - Change lock type to spin lock
 
 
 	void (*connect_cfm_cb)	(struct hci_conn *conn, u8 status);
@@ -425,6 +424,8 @@ enum {
 	HCI_CONN_RSWITCH_PEND,
 	HCI_CONN_MODE_CHANGE_PEND,
 	HCI_CONN_SCO_SETUP_PEND,
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03
+	HCI_CONN_CHANGE_LP_DURING_CONNECTION, // jasper disable_sniff
 };
 
 static inline void hci_conn_hash_init(struct hci_dev *hdev)
@@ -605,6 +606,9 @@ struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
 					bdaddr_t *dst, __u8 sec_level,
 					__u8 auth_type,
 					struct bt_le_params *le_params);
+void hci_le_add_dev_white_list(struct hci_dev *hdev, bdaddr_t *dst);
+void hci_le_remove_dev_white_list(struct hci_dev *hdev, bdaddr_t *dst);
+void hci_le_cancel_create_connect(struct hci_dev *hdev, bdaddr_t *dst);
 int hci_conn_check_link_mode(struct hci_conn *conn);
 int hci_conn_security(struct hci_conn *conn, __u8 sec_level, __u8 auth_type);
 int hci_conn_change_link_key(struct hci_conn *conn);
@@ -613,9 +617,11 @@ void hci_disconnect(struct hci_conn *conn, __u8 reason);
 void hci_disconnect_amp(struct hci_conn *conn, __u8 reason);
 
 void hci_conn_enter_active_mode(struct hci_conn *conn, __u8 force_active);
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 // +s LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO
 void hci_conn_enter_active_mode_no_timer(struct hci_conn *conn);
 // +e LGBT_COMMON_FUNCTION_NO_SNIFF_WHEN_OPEN_SCO
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 void hci_conn_enter_sniff_mode(struct hci_conn *conn);
 
 void hci_conn_hold_device(struct hci_conn *conn);
@@ -624,6 +630,8 @@ void hci_conn_put_device(struct hci_conn *conn);
 void hci_conn_set_rssi_reporter(struct hci_conn *conn,
 		s8 rssi_threshold, u16 interval, u8 updateOnThreshExceed);
 void hci_conn_unset_rssi_reporter(struct hci_conn *conn);
+//QCT_Local : Mozen Carkit SCO Noise issue 13.01.03
+int hci_conn_change_link_policy(struct hci_conn *conn, __u8 lp);  //jasper disable_sniff
 
 static inline void hci_conn_hold(struct hci_conn *conn)
 {
@@ -1039,7 +1047,9 @@ int mgmt_discoverable(u16 index, u8 discoverable);
 int mgmt_connectable(u16 index, u8 connectable);
 int mgmt_new_key(u16 index, struct link_key *key, u8 bonded);
 int mgmt_connected(u16 index, bdaddr_t *bdaddr, u8 le);
-int mgmt_disconnected(u16 index, bdaddr_t *bdaddr);
+int mgmt_le_conn_params(u16 index, bdaddr_t *bdaddr, u16 interval,
+						u16 latency, u16 timeout);
+int mgmt_disconnected(u16 index, bdaddr_t *bdaddr, u8 reason);
 int mgmt_disconnect_failed(u16 index);
 int mgmt_connect_failed(u16 index, bdaddr_t *bdaddr, u8 status);
 int mgmt_pin_code_request(u16 index, bdaddr_t *bdaddr);

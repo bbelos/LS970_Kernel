@@ -29,7 +29,7 @@ enum{
  *   INTERNAL DEFINITION
  */
 #ifdef FELICA_LED_SUPPORT
-#define FELICA_LED_INTENT "com.nttdocomo.android.felicaremotelock/.LEDService"
+#define FELICA_LED_INTENT "com.lge.felicaservice/.LEDService"
 #endif
 
 /*
@@ -64,7 +64,7 @@ static int invoke_led_service(void)
 	static char *envp[] = {FELICA_LD_LIBRARY_PATH,FELICA_BOOTCLASSPATH,FELICA_PATH,NULL};
 
 	FELICA_DEBUG_MSG("[FELICA_RFS] invoke led service ... \n");
-	getvalue = felica_gpio_read(GPIO_FELICA_RFS);
+	getvalue = felica_gpio_read(felica_get_rfs_gpio_num());
 	FELICA_DEBUG_MSG("[FELICA_RFS] felica_gpio_read = %d , isFelicaUsed =%d \n",getvalue,isFelicaUsed);
 	if( isFelicaUsed ==0 && getvalue == GPIO_LOW_VALUE)
 	{
@@ -95,7 +95,7 @@ static void felica_rfs_interrupt_work(struct work_struct *data)
 {
 	int rc = 0;
 
-	disable_irq_nosync(gpio_to_irq(GPIO_FELICA_RFS));
+	disable_irq_nosync(gpio_to_irq(felica_get_rfs_gpio_num()));
 	usermodehelper_enable();
 
 	#ifdef FEATURE_DEBUG_LOW
@@ -112,7 +112,7 @@ static void felica_rfs_interrupt_work(struct work_struct *data)
 	FELICA_DEBUG_MSG("[FELICA_RFS] felica_rfs_interrupt_work - end \n");
 	#endif
 
-	enable_irq(gpio_to_irq(GPIO_FELICA_RFS));
+	enable_irq(gpio_to_irq(felica_get_rfs_gpio_num()));
 }
 irqreturn_t felica_rfs_detect_interrupt(int irq, void *dev_id)
 {
@@ -155,9 +155,9 @@ static int felica_rfs_open (struct inode *inode, struct file *fp)
   }
 
 #ifdef FELICA_LED_SUPPORT
-  rc = felica_gpio_open(GPIO_FELICA_RFS, GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
+  rc = felica_gpio_open(felica_get_rfs_gpio_num(), GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
 #else
-  rc = felica_gpio_open(GPIO_FELICA_RFS, GPIO_DIRECTION_IN, GPIO_LOW_VALUE);
+  rc = felica_gpio_open(felica_get_rfs_gpio_num(), GPIO_DIRECTION_IN, GPIO_LOW_VALUE);
 #endif
 
   #ifdef FEATURE_DEBUG_LOW
@@ -214,7 +214,7 @@ static ssize_t felica_rfs_read(struct file *fp, char *buf, size_t count, loff_t 
   }
 
 /* Get GPIO value */
-  getvalue = felica_gpio_read(GPIO_FELICA_RFS);
+  getvalue = felica_gpio_read(felica_get_rfs_gpio_num());
   FELICA_DEBUG_MSG("[FELICA_RFS] RFS GPIO status : %d \n", getvalue);
 
   if((GPIO_LOW_VALUE != getvalue)&&(GPIO_HIGH_VALUE != getvalue))
@@ -295,7 +295,7 @@ static void felica_rfs_open_after_boot_work(struct work_struct *data)
 #ifdef FEATURE_DEBUG_LOW
 	FELICA_DEBUG_MSG("[FELICA_RFS] felica_rfs_open_after_boot_work - start");
 #endif
-	rc = felica_gpio_open(GPIO_FELICA_RFS, GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
+	rc = felica_gpio_open(felica_get_rfs_gpio_num(), GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
 #ifdef FEATURE_DEBUG_LOW
 	FELICA_DEBUG_MSG("[FELICA_RFS] felica_rfs_open_after_boot_work - end");
 #endif
@@ -333,13 +333,13 @@ static int felica_rfs_init(void)
   }
 #ifdef FELICA_LED_SUPPORT
   FELICA_DEBUG_MSG("[FELICA_RFS] FELICA LED NEW SUPPORT !!\n");
-  rc= request_irq(gpio_to_irq(GPIO_FELICA_RFS), felica_rfs_detect_interrupt, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND , FELICA_RFS_NAME, NULL);
+  rc= request_irq(gpio_to_irq(felica_get_rfs_gpio_num()), felica_rfs_detect_interrupt, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND , FELICA_RFS_NAME, NULL);
   if (rc)
   {
     FELICA_DEBUG_MSG("[FELICA_RFS] FAIL!! can not request_irq \n");
     return rc;
   }
-   irq_set_irq_wake(gpio_to_irq(GPIO_FELICA_RFS),1);
+   irq_set_irq_wake(gpio_to_irq(felica_get_rfs_gpio_num()),1);
 
    init_felica_rfs_wake_lock();
 #else
@@ -363,7 +363,7 @@ static void felica_rfs_exit(void)
 	#endif
 #ifdef FELICA_LED_SUPPORT
 
-	free_irq(gpio_to_irq(GPIO_FELICA_RFS), NULL);
+	free_irq(gpio_to_irq(felica_get_rfs_gpio_num()), NULL);
 
 	destroy_felica_rfs_wake_lock();
 

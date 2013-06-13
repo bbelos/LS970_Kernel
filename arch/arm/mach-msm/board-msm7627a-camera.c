@@ -16,9 +16,10 @@
 #include <linux/regulator/consumer.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/module.h>
 #include <asm/mach-types.h>
 #include <mach/msm_iomap.h>
-#include <mach/board.h>
+#include <mach/camera.h>
 #include <mach/irqs-7xxx.h>
 #include "devices-msm7x2xa.h"
 #include "board-msm7627a.h"
@@ -280,8 +281,15 @@ static struct msm_camera_gpio_conf gpio_conf_ov8825 = {
 	.gpio_no_mux = 1,
 };
 
+static struct msm_camera_sensor_flash_src msm_flash_src_ov8825 = {
+	.flash_sr_type = MSM_CAMERA_FLASH_SRC_LED1,
+	._fsrc.ext_driver_src.led_en = 13,
+	._fsrc.ext_driver_src.led_flash_en = 32,
+};
+
 static struct msm_camera_sensor_flash_data flash_ov8825 = {
-	.flash_type     = MSM_CAMERA_FLASH_NONE,
+	.flash_type     = MSM_CAMERA_FLASH_LED,
+	.flash_src      = &msm_flash_src_ov8825,
 };
 
 static struct msm_camera_sensor_platform_info sensor_board_info_ov8825 = {
@@ -289,6 +297,14 @@ static struct msm_camera_sensor_platform_info sensor_board_info_ov8825 = {
 	.cam_vreg = msm_cam_vreg,
 	.num_vreg = ARRAY_SIZE(msm_cam_vreg),
 	.gpio_conf = &gpio_conf_ov8825,
+};
+
+static struct msm_actuator_info msm_act_main_cam_3_info = {
+	.board_info     = &msm_act_main_cam_i2c_info,
+	.cam_name   = MSM_ACTUATOR_MAIN_CAM_3,
+	.bus_id         = MSM_GSBI0_QUP_I2C_BUS_ID,
+	.vcm_pwd        = GPIO_SKU3_CAM_5MP_CAM_DRIVER_PWDN,
+	.vcm_enable     = 0,
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_ov8825_data = {
@@ -302,6 +318,8 @@ static struct msm_camera_sensor_info msm_camera_sensor_ov8825_data = {
 	.sensor_platform_info = &sensor_board_info_ov8825,
 	.csi_if = 1,
 	.camera_type = BACK_CAMERA_2D,
+	.sensor_type = BAYER_SENSOR,
+	.actuator_info = &msm_act_main_cam_3_info,
 };
 
 #ifdef CONFIG_MT9E013
@@ -378,8 +396,10 @@ static void __init msm7x27a_init_cam(void)
 		sensor_board_info_ov8825.num_vreg = 0;
 
 	}
-	if (machine_is_msm8625_evb()
-			|| machine_is_msm8625_evt()) {
+	if (machine_is_msm8625_evb() || machine_is_msm7627a_evb()
+				||  machine_is_msm8625_evt()
+				|| machine_is_msm7627a_qrd3()
+				|| machine_is_msm8625_qrd7()) {
 		sensor_board_info_ov7692.cam_vreg =
 			ov7692_gpio_vreg;
 		sensor_board_info_ov7692.num_vreg =
@@ -786,8 +806,8 @@ static struct platform_device msm_camera_sensor_imx072 = {
 };
 #endif
 
-static struct msm_camera_sensor_info msm_camera_sensor_ov9726_data;
 #ifdef CONFIG_WEBCAM_OV9726
+static struct msm_camera_sensor_info msm_camera_sensor_ov9726_data;
 static struct msm_camera_sensor_platform_info ov9726_sensor_7627a_info = {
 	.mount_angle = 90
 };

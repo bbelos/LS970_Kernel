@@ -65,7 +65,7 @@ static void felica_int_low_work(struct work_struct *data)
   int rc = 0;
 
   lock_felica_wake_lock();
-  disable_irq_nosync(gpio_to_irq(GPIO_FELICA_INT));
+  disable_irq_nosync(gpio_to_irq(felica_get_int_gpio_num()));
 
   usermodehelper_enable();
 
@@ -85,7 +85,7 @@ static void felica_int_low_work(struct work_struct *data)
   FELICA_DEBUG_MSG("[FELICA_RWS] felica_int_low_work - end \n");
   //#endif
 
-  enable_irq(gpio_to_irq(GPIO_FELICA_INT));
+  enable_irq(gpio_to_irq(felica_get_int_gpio_num()));
 }
 
 static irqreturn_t felica_int_low_isr(int irq, void *dev_id)
@@ -95,7 +95,7 @@ static irqreturn_t felica_int_low_isr(int irq, void *dev_id)
   #endif
 
   schedule_delayed_work(&felica_int_work,0);
-  
+
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_RWS] felica_int_low_isr - end \n");
   #endif
@@ -129,7 +129,7 @@ static int felica_rws_open (struct inode *inode, struct file *fp)
     isopen = 1;
   }
 
-  rc = felica_gpio_open(GPIO_FELICA_INT, GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
+  rc = felica_gpio_open(felica_get_int_gpio_num(), GPIO_DIRECTION_IN, GPIO_HIGH_VALUE);
 
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_RWS] felica_rws_open - end \n");
@@ -183,7 +183,7 @@ static ssize_t felica_rws_read(struct file *fp, char *buf, size_t count, loff_t 
   }
 
 /* Get GPIO value */
-  getvalue = felica_gpio_read(GPIO_FELICA_INT);
+  getvalue = felica_gpio_read(felica_get_int_gpio_num());
 
   if((GPIO_LOW_VALUE != getvalue)&&(GPIO_HIGH_VALUE != getvalue))
   {
@@ -291,7 +291,7 @@ static int felica_rws_init(void)
     return rc;
   }
 
-  rc= request_irq(gpio_to_irq(GPIO_FELICA_INT), felica_int_low_isr, IRQF_TRIGGER_FALLING|IRQF_NO_SUSPEND, FELICA_RWS_NAME, NULL);
+  rc= request_irq(gpio_to_irq(felica_get_int_gpio_num()), felica_int_low_isr, IRQF_TRIGGER_FALLING|IRQF_NO_SUSPEND, FELICA_RWS_NAME, NULL);
 
   if (rc)
   {
@@ -299,7 +299,7 @@ static int felica_rws_init(void)
     return rc;
   }
 
-  irq_set_irq_wake(gpio_to_irq(GPIO_FELICA_INT),1);
+  irq_set_irq_wake(gpio_to_irq(felica_get_int_gpio_num()),1);
 
   #ifdef FEATURE_DEBUG_LOW
   FELICA_DEBUG_MSG("[FELICA_RWS] felica_rws_init - end \n");
@@ -314,7 +314,7 @@ static void felica_rws_exit(void)
   FELICA_DEBUG_MSG("[FELICA_INT] felica_rws_exit - start \n");
   #endif
 
-  free_irq(gpio_to_irq(GPIO_FELICA_INT), NULL);
+  free_irq(gpio_to_irq(felica_get_int_gpio_num()), NULL);
 
   misc_deregister(&felica_rws_device);
 

@@ -15,7 +15,20 @@
 #define VCAP_FMT_H
 
 #define V4L2_BUF_TYPE_INTERLACED_IN_DECODER (V4L2_BUF_TYPE_PRIVATE)
-#define V4L2_BUF_TYPE_VP_OUT (V4L2_BUF_TYPE_PRIVATE + 1)
+
+#define VCAP_GENERIC_NOTIFY_EVENT 0
+#define VCAP_VC_PIX_ERR_EVENT 1
+#define VCAP_VC_LINE_ERR_EVENT 2
+#define VCAP_VC_VSYNC_ERR_EVENT 3
+#define VCAP_VC_NPL_OFLOW_ERR_EVENT 4
+#define VCAP_VC_LBUF_OFLOW_ERR_EVENT 5
+#define VCAP_VC_BUF_OVERWRITE_EVENT 6
+#define VCAP_VP_REG_R_ERR_EVENT 7
+#define VCAP_VP_REG_W_ERR_EVENT 8
+#define VCAP_VP_IN_HEIGHT_ERR_EVENT 9
+#define VCAP_VP_IN_WIDTH_ERR_EVENT 10
+#define VCAP_VC_UNEXPECT_BUF_DONE 11
+#define VCAP_MAX_NOTIFY_EVENT 12
 
 enum hal_vcap_mode {
 	HAL_VCAP_MODE_PRO = 0,
@@ -32,6 +45,44 @@ enum hal_vcap_color {
 	HAL_VCAP_RGB,
 };
 
+enum nr_mode {
+	NR_DISABLE = 0,
+	NR_AUTO,
+	NR_MANUAL,
+};
+
+enum nr_decay_ratio {
+	NR_Decay_Ratio_26 = 0,
+	NR_Decay_Ratio_25,
+	NR_Decay_Ratio_24,
+	NR_Decay_Ratio_23,
+	NR_Decay_Ratio_22,
+	NR_Decay_Ratio_21,
+	NR_Decay_Ratio_20,
+	NR_Decay_Ratio_19,
+};
+
+struct nr_config {
+	uint8_t max_blend_ratio;
+	uint8_t scale_diff_ratio;
+	uint8_t diff_limit_ratio;
+	uint8_t scale_motion_ratio;
+	uint8_t blend_limit_ratio;
+};
+
+struct nr_param {
+	enum nr_mode mode;
+	enum nr_decay_ratio decay_ratio;
+	uint8_t window;
+	struct nr_config luma;
+	struct nr_config chroma;
+};
+
+#define VCAPIOC_NR_S_PARAMS _IOWR('V', (BASE_VIDIOC_PRIVATE+0), struct nr_param)
+
+#define VCAPIOC_NR_G_PARAMS _IOWR('V', (BASE_VIDIOC_PRIVATE+1), struct nr_param)
+#define VCAPIOC_S_NUM_VC_BUF _IOWR('V', (BASE_VIDIOC_PRIVATE+2), int)
+
 struct v4l2_format_vc_ext {
 	enum hal_vcap_mode     mode;
 	enum hal_vcap_polar    h_polar;
@@ -39,7 +90,8 @@ struct v4l2_format_vc_ext {
 	enum hal_vcap_polar    d_polar;
 	enum hal_vcap_color    color_space;
 
-	float  clk_freq;
+	uint32_t clk_freq;
+	uint32_t frame_rate;
 	uint32_t vtotal;
 	uint32_t htotal;
 	uint32_t hactive_start;

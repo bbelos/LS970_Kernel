@@ -27,15 +27,15 @@
 #include <linux/leds.h>
 #include <linux/leds-pm8xxx.h>
 #include <linux/power/ltc4088-charger.h>
+#include <linux/gpio.h>
 #include <linux/msm_tsens.h>
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <linux/memory.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/hardware/gic.h>
 #include <mach/board.h>
 #include <mach/msm_iomap.h>
-#include <mach/gpio.h>
 #include <mach/socinfo.h>
 #include <mach/msm_spi.h>
 #include <mach/msm_bus_board.h>
@@ -45,13 +45,14 @@
 #include <mach/msm_memtypes.h>
 #include <mach/cpuidle.h>
 #include <mach/usb_bam.h>
+#include <mach/restart.h>
 #include "timer.h"
 #include "devices.h"
 #include "board-9615.h"
 #include "pm.h"
-#include "acpuclock.h"
 #include "pm-boot.h"
 #include <mach/gpiomux.h>
+#include "ci13xxx_udc.h"
 
 #ifdef CONFIG_ION_MSM
 #define MSM_ION_AUDIO_SIZE	0xAF000
@@ -611,7 +612,7 @@ static int msm_hsusb_vbus_power(bool on)
 static int shelby_phy_init_seq[] = {
 	0x44, 0x80,/* set VBUS valid threshold and
 			disconnect valid threshold */
-	0x38, 0x81, /* update DC voltage level */
+	0x68, 0x81, /* update DC voltage level */
 	0x24, 0x82,/* set preemphasis and rise/fall time */
 	0x13, 0x83,/* set source impedance adjustment */
 	-1};
@@ -619,8 +620,8 @@ static int shelby_phy_init_seq[] = {
 #define USB_BAM_PHY_BASE	0x12502000
 #define HSIC_BAM_PHY_BASE	0x12542000
 #define A2_BAM_PHY_BASE		0x124C2000
-static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
-	[0][0][USB_TO_PEER_PERIPHERAL] = {
+static struct usb_bam_pipe_connect msm_usb_bam_connections[MAX_BAMS][4][2] = {
+	[HSUSB_BAM][0][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = USB_BAM_PHY_BASE,
 		.src_pipe_index = 11,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -630,7 +631,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x1700,
 		.desc_fifo_size = 0x300,
 	},
-	[0][0][PEER_PERIPHERAL_TO_USB] = {
+	[HSUSB_BAM][0][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 1,
 		.dst_phy_addr = USB_BAM_PHY_BASE,
@@ -640,7 +641,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x1000,
 		.desc_fifo_size = 0x100,
 	},
-	[0][1][USB_TO_PEER_PERIPHERAL] = {
+	[HSUSB_BAM][1][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = USB_BAM_PHY_BASE,
 		.src_pipe_index = 13,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -650,7 +651,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x2700,
 		.desc_fifo_size = 0x300,
 	},
-	[0][1][PEER_PERIPHERAL_TO_USB] = {
+	[HSUSB_BAM][1][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 3,
 		.dst_phy_addr = USB_BAM_PHY_BASE,
@@ -660,7 +661,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x2000,
 		.desc_fifo_size = 0x100,
 	},
-	[0][2][USB_TO_PEER_PERIPHERAL] = {
+	[HSUSB_BAM][2][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = USB_BAM_PHY_BASE,
 		.src_pipe_index = 15,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -670,7 +671,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x3700,
 		.desc_fifo_size = 0x300,
 	},
-	[0][2][PEER_PERIPHERAL_TO_USB] = {
+	[HSUSB_BAM][2][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 5,
 		.dst_phy_addr = USB_BAM_PHY_BASE,
@@ -680,7 +681,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x3000,
 		.desc_fifo_size = 0x100,
 	},
-	[1][0][USB_TO_PEER_PERIPHERAL] = {
+	[HSIC_BAM][0][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = HSIC_BAM_PHY_BASE,
 		.src_pipe_index = 1,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -690,7 +691,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x1700,
 		.desc_fifo_size = 0x300,
 	},
-	[1][0][PEER_PERIPHERAL_TO_USB] = {
+	[HSIC_BAM][0][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 1,
 		.dst_phy_addr = HSIC_BAM_PHY_BASE,
@@ -700,7 +701,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x1000,
 		.desc_fifo_size = 0x100,
 	},
-	[1][1][USB_TO_PEER_PERIPHERAL] = {
+	[HSIC_BAM][1][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = HSIC_BAM_PHY_BASE,
 		.src_pipe_index = 3,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -710,7 +711,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x2700,
 		.desc_fifo_size = 0x300,
 	},
-	[1][1][PEER_PERIPHERAL_TO_USB] = {
+	[HSIC_BAM][1][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 3,
 		.dst_phy_addr = HSIC_BAM_PHY_BASE,
@@ -720,7 +721,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x2000,
 		.desc_fifo_size = 0x100,
 	},
-	[1][2][USB_TO_PEER_PERIPHERAL] = {
+	[HSIC_BAM][2][USB_TO_PEER_PERIPHERAL] = {
 		.src_phy_addr = HSIC_BAM_PHY_BASE,
 		.src_pipe_index = 5,
 		.dst_phy_addr = A2_BAM_PHY_BASE,
@@ -730,7 +731,7 @@ static struct usb_bam_pipe_connect msm_usb_bam_connections[2][4][2] = {
 		.desc_fifo_base_offset = 0x3700,
 		.desc_fifo_size = 0x300,
 	},
-	[1][2][PEER_PERIPHERAL_TO_USB] = {
+	[HSIC_BAM][2][PEER_PERIPHERAL_TO_USB] = {
 		.src_phy_addr = A2_BAM_PHY_BASE,
 		.src_pipe_index = 5,
 		.dst_phy_addr = HSIC_BAM_PHY_BASE,
@@ -762,8 +763,19 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	.core_clk_always_on_workaround = true,
 };
 
-static struct msm_hsic_peripheral_platform_data msm_hsic_peripheral_pdata = {
+
+static struct ci13xxx_platform_data msm_peripheral_pdata = {
+	.usb_core_id = 0,
+};
+
+static struct msm_hsic_peripheral_platform_data
+			msm_hsic_peripheral_pdata_private = {
 	.core_clk_always_on_workaround = true,
+};
+
+static struct ci13xxx_platform_data msm_hsic_peripheral_pdata = {
+	.usb_core_id = 1,
+	.prv_data = &msm_hsic_peripheral_pdata_private,
 };
 
 #define PID_MAGIC_ID		0x71432909
@@ -851,6 +863,7 @@ static struct platform_device msm_tsens_device = {
 };
 
 static struct platform_device *common_devices[] = {
+	&msm9615_device_acpuclk,
 	&msm9615_device_dmov,
 	&msm_device_smd,
 #ifdef CONFIG_LTC4088_CHARGER
@@ -863,6 +876,7 @@ static struct platform_device *common_devices[] = {
 	&msm_device_hsic_host,
 	&msm_device_usb_bam,
 	&msm_android_usb_device,
+	&msm_android_usb_hsic_device,
 	&msm9615_device_uart_gsbi4,
 	&msm9615_device_ext_2p95v_vreg,
 	&msm9615_device_ssbi_pmic1,
@@ -918,6 +932,7 @@ static struct platform_device *common_devices[] = {
 	&msm_bus_def_fab,
 	&msm9615_rpm_log_device,
 	&msm9615_rpm_stat_device,
+	&msm9615_rpm_master_stat_device,
 	&msm_tsens_device,
 };
 
@@ -958,8 +973,11 @@ static void __init msm9615_common_init(void)
 {
 	struct android_usb_platform_data *android_pdata =
 				msm_android_usb_device.dev.platform_data;
+	struct android_usb_platform_data *android_hsic_pdata =
+				msm_android_usb_hsic_device.dev.platform_data;
 
 	msm9615_device_init();
+	platform_device_register(&msm_gpio_device);
 	msm9615_init_gpiomux();
 	msm9615_i2c_init();
 	regulator_suppress_info_printing();
@@ -975,12 +993,13 @@ static void __init msm9615_common_init(void)
 
 	msm_device_otg.dev.platform_data = &msm_otg_pdata;
 	msm_otg_pdata.phy_init_seq = shelby_phy_init_seq;
+	msm_device_gadget_peripheral.dev.platform_data =
+		&msm_peripheral_pdata;
 	msm_device_hsic_peripheral.dev.platform_data =
 		&msm_hsic_peripheral_pdata;
 	msm_device_usb_bam.dev.platform_data = &msm_usb_bam_pdata;
 	platform_add_devices(common_devices, ARRAY_SIZE(common_devices));
 	msm9615_pm8xxx_gpio_mpp_init();
-	acpuclk_init(&acpuclk_9615_soc_data);
 
 	/* Ensure ar6000pm device is registered before MMC/SDC */
 	msm9615_init_ar6000pm();
@@ -988,8 +1007,12 @@ static void __init msm9615_common_init(void)
 	msm9615_init_mmc();
 	slim_register_board_info(msm_slim_devices,
 		ARRAY_SIZE(msm_slim_devices));
+
 	android_pdata->update_pid_and_serial_num =
 					usb_diag_update_pid_and_serial_num;
+	android_hsic_pdata->update_pid_and_serial_num =
+					usb_diag_update_pid_and_serial_num;
+
 	msm_pm_boot_pdata.p_addr = allocate_contiguous_ebi_nomap(SZ_8, SZ_64K);
 	BUG_ON(msm_pm_boot_init(&msm_pm_boot_pdata));
 	msm_tsens_early_init(&msm_tsens_pdata);
@@ -1025,6 +1048,7 @@ MACHINE_START(MSM9615_CDP, "QCT MSM9615 CDP")
 #ifdef CONFIG_FB_MSM
 	.init_early = mdm9615_allocate_memory_regions,
 #endif
+	.restart = msm_restart,
 MACHINE_END
 
 MACHINE_START(MSM9615_MTP, "QCT MSM9615 MTP")
@@ -1034,4 +1058,5 @@ MACHINE_START(MSM9615_MTP, "QCT MSM9615 MTP")
 	.timer = &msm_timer,
 	.init_machine = msm9615_mtp_init,
 	.reserve = msm9615_reserve,
+	.restart = msm_restart,
 MACHINE_END

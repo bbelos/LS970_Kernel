@@ -43,6 +43,7 @@ unsigned char F54_FullRawCap(int mode)
    int Result = 0;
 #ifdef F54_Porting
 	int ret = 0;
+	unsigned char product_id[11];
 #endif
     int TSPCheckLimit=700;
 	short Flex_LowerLimit = -100;
@@ -55,6 +56,25 @@ unsigned char F54_FullRawCap(int mode)
 
 	length = numberOfTx * numberOfRx* 2;
 
+	//check product id to set basecap array
+	readRMI(F01_Query_Base+11, &product_id[0], sizeof(product_id));
+	
+	if(!strncmp(product_id, "TM2369", 6)) {
+		printk("set limit array to TPK value.\n");
+		memcpy(Limit, Limit_TPK, sizeof(Limit_TPK));
+	} else if(!strncmp(product_id, "PLG192", 6)) {
+		printk("set limit array to PLG192 value.\n");
+		memcpy(Limit, Limit_PLG192, sizeof(Limit_PLG192));
+	} else if(!strncmp(product_id, "PLG193", 6)) {
+		printk("set limit array to PLG193 value.\n");
+		memcpy(Limit, Limit_PLG193, sizeof(Limit_PLG193));
+	} else if(!strncmp(product_id, "PLG121", 6)) {
+		printk("set limit array to PLG121 value.\n");
+		memcpy(Limit, Limit_PLG121, sizeof(Limit_PLG121));
+	} else {
+		printk("set limit array to LGIT value.\n");
+	}
+	
 	//set limit array
 	if(call_cnt == 0){
 		printk("Backup Limit to LimitBack array\n");

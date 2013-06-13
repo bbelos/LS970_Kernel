@@ -12,9 +12,8 @@
 
 #define pr_fmt(fmt)	"%s: " fmt, __func__
 
-#define Ledlog(x, ...) printk(x, ##__VA_ARGS__)
-
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
@@ -25,6 +24,7 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/pwm.h>
 #include <linux/leds-pm8xxx.h>
+
 
 #define SSBI_REG_ADDR_DRV_KEYPAD	0x48
 #define PM8XXX_DRV_KEYPAD_BL_MASK	0xf0
@@ -47,8 +47,8 @@
 /* wled control registers */
 #define WLED_MOD_CTRL_REG		SSBI_REG_ADDR_WLED_CTRL(1)
 #define WLED_MAX_CURR_CFG_REG(n)	SSBI_REG_ADDR_WLED_CTRL(n + 2)
-#define WLED_BRIGHTNESS_CNTL_REG1(n)	SSBI_REG_ADDR_WLED_CTRL(n + 5)
-#define WLED_BRIGHTNESS_CNTL_REG2(n)	SSBI_REG_ADDR_WLED_CTRL(n + 6)
+#define WLED_BRIGHTNESS_CNTL_REG1(n)	SSBI_REG_ADDR_WLED_CTRL((2 * n) + 5)
+#define WLED_BRIGHTNESS_CNTL_REG2(n)	SSBI_REG_ADDR_WLED_CTRL((2 * n) + 6)
 #define WLED_SYNC_REG			SSBI_REG_ADDR_WLED_CTRL(11)
 #define WLED_OVP_CFG_REG		SSBI_REG_ADDR_WLED_CTRL(13)
 #define WLED_BOOST_CFG_REG		SSBI_REG_ADDR_WLED_CTRL(14)
@@ -81,6 +81,17 @@
 
 #define WLED_SYNC_VAL			0x07
 #define WLED_SYNC_RESET_VAL		0x00
+#define WLED_SYNC_MASK			0xF8
+
+#define ONE_WLED_STRING			1
+#define TWO_WLED_STRINGS		2
+#define THREE_WLED_STRINGS		3
+
+#define WLED_CABC_ONE_STRING		0x01
+#define WLED_CABC_TWO_STRING		0x03
+#define WLED_CABC_THREE_STRING		0x07
+
+#define WLED_CABC_SHIFT			3
 
 #define SSBI_REG_ADDR_RGB_CNTL1		0x12D
 #define SSBI_REG_ADDR_RGB_CNTL2		0x12E
@@ -170,10 +181,20 @@ struct pm8xxx_led_data {
 	int			max_current;
 };
 
+/* Debug mask value
+ * usage: echo [debug_mask] > /sys/module/leds_pm8xxx/parameters/debug_mask
+ */
+u32 keyled_debug_mask = DEBUG_LED_NONE;
+module_param_named(debug_mask, keyled_debug_mask, int, S_IRUGO|S_IWUSR|S_IWGRP);
+
+
 static void led_kp_set(struct pm8xxx_led_data *led, enum led_brightness value)
 {
 	int rc;
 	u8 level;
+
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] led_kp_set \n");
 
 	level = (value << PM8XXX_DRV_KEYPAD_BL_SHIFT) &
 				 PM8XXX_DRV_KEYPAD_BL_MASK;
@@ -193,9 +214,11 @@ static void led_lc_set(struct pm8xxx_led_data *led, enum led_brightness value)
 	int rc, offset;
 	u8 level;
 
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] led_lc_set \n");
+
 	level = (value << PM8XXX_DRV_LED_CTRL_SHIFT) &
 				PM8XXX_DRV_LED_CTRL_MASK;
-
 	offset = PM8XXX_LED_OFFSET(led->id);
 
 	led->reg &= ~PM8XXX_DRV_LED_CTRL_MASK;
@@ -203,6 +226,11 @@ static void led_lc_set(struct pm8xxx_led_data *led, enum led_brightness value)
 
 	rc = pm8xxx_writeb(led->dev->parent, SSBI_REG_ADDR_LED_CTRL(offset),
 								led->reg);
+
+	if (likely(keyled_debug_mask & DEBUG_LED_REG))
+		printk("[leds-pm8xxx] led_lc_set (0x%x : %d), level : %d\n", 
+								SSBI_REG_ADDR_LED_CTRL(offset), led->reg, level);
+
 	if (rc)
 		dev_err(led->cdev.dev, "can't set (%d) led value rc=%d\n",
 				led->id, rc);
@@ -291,17 +319,23 @@ led_wled_set(struct pm8xxx_led_data *led, enum led_brightness value)
 			return rc;
 		}
 	}
-
+	rc = pm8xxx_readb(led->dev->parent, WLED_SYNC_REG, &val);
+	if (rc) {
+		dev_err(led->dev->parent,
+			"can't read wled sync register rc=%d\n", rc);
+		return rc;
+	}
 	/* sync */
-	val = WLED_SYNC_VAL;
+	val &= WLED_SYNC_MASK;
+	val |= WLED_SYNC_VAL;
 	rc = pm8xxx_writeb(led->dev->parent, WLED_SYNC_REG, val);
 	if (rc) {
 		dev_err(led->dev->parent,
 			"can't read wled sync register rc=%d\n", rc);
 		return rc;
 	}
-
-	val = WLED_SYNC_RESET_VAL;
+	val &= WLED_SYNC_MASK;
+	val |= WLED_SYNC_RESET_VAL;
 	rc = pm8xxx_writeb(led->dev->parent, WLED_SYNC_REG, val);
 	if (rc) {
 		dev_err(led->dev->parent,
@@ -324,12 +358,18 @@ static void wled_dump_regs(struct pm8xxx_led_data *led)
 }
 
 static void
-led_rgb_set(struct pm8xxx_led_data *led, enum led_brightness value)
+led_rgb_write(struct pm8xxx_led_data *led, u16 addr, enum led_brightness value)
 {
 	int rc;
 	u8 val, mask;
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] led_rgb_write\n");
+	if (led->id != PM8XXX_ID_RGB_LED_BLUE &&
+		led->id != PM8XXX_ID_RGB_LED_RED &&
+		led->id != PM8XXX_ID_RGB_LED_GREEN)
+		return;
 
-	rc = pm8xxx_readb(led->dev->parent, SSBI_REG_ADDR_RGB_CNTL2, &val);
+	rc = pm8xxx_readb(led->dev->parent, addr, &val);
 	if (rc) {
 		dev_err(led->cdev.dev, "can't read rgb ctrl register rc=%d\n",
 							rc);
@@ -355,27 +395,51 @@ led_rgb_set(struct pm8xxx_led_data *led, enum led_brightness value)
 	else
 		val &= ~mask;
 
-	rc = pm8xxx_writeb(led->dev->parent, SSBI_REG_ADDR_RGB_CNTL2, val);
+	rc = pm8xxx_writeb(led->dev->parent, addr, val);
 	if (rc < 0)
 		dev_err(led->cdev.dev, "can't set rgb led %d level rc=%d\n",
 			 led->id, rc);
+}
+
+static void
+led_rgb_set(struct pm8xxx_led_data *led, enum led_brightness value)
+{
+	if (value) {
+		led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1, value);
+		led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL2, value);
+	} else {
+		led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL2, value);
+		led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1, value);
+	}
 }
 
 static int pm8xxx_led_pwm_work(struct pm8xxx_led_data *led)
 {
 	int duty_us;
 	int rc = 0;
-
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] pm8xxx_led_pwm_work\n");
 	if (led->pwm_duty_cycles == NULL) {
 		duty_us = (led->pwm_period_us * led->cdev.brightness) /
 								LED_FULL;
 		rc = pwm_config(led->pwm_dev, duty_us, led->pwm_period_us);
-		if (led->cdev.brightness)
+		if (led->cdev.brightness) {
+			led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1,
+				led->cdev.brightness);
 			rc = pwm_enable(led->pwm_dev);
-		else
+		} else {
 			pwm_disable(led->pwm_dev);
+			led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1,
+				led->cdev.brightness);
+		}
 	} else {
+		if (led->cdev.brightness)
+			led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1,
+				led->cdev.brightness);
 		rc = pm8xxx_pwm_lut_enable(led->pwm_dev, led->cdev.brightness);
+		if (!led->cdev.brightness)
+			led_rgb_write(led, SSBI_REG_ADDR_RGB_CNTL1,
+				led->cdev.brightness);
 	}
 
 	return rc;
@@ -387,7 +451,8 @@ static void __pm8xxx_led_work(struct pm8xxx_led_data *led,
 	int rc;
 
 	mutex_lock(&led->lock);
-
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] __pm8xxx_led_work\n");
 	switch (led->id) {
 	case PM8XXX_ID_LED_KB_LIGHT:
 		led_kp_set(led, level);
@@ -425,7 +490,8 @@ static void pm8xxx_led_work(struct work_struct *work)
 
 	struct pm8xxx_led_data *led = container_of(work,
 					 struct pm8xxx_led_data, work);
-
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] pm8xxx_led_work (id : %d )\n",led->id);
 	if (led->pwm_dev == NULL) {
 		__pm8xxx_led_work(led, led->cdev.brightness);
 	} else {
@@ -440,41 +506,38 @@ static void pm8xxx_led_set(struct led_classdev *led_cdev,
 	enum led_brightness value)
 {
 	struct	pm8xxx_led_data *led;
-
-    #if defined(LGE_PWM_LED)
+#ifdef CONFIG_LGE_PM_PWM_LED
 	int idx_len0;
 	int idx_len1;
-	#endif
+#endif
 
 	led = container_of(led_cdev, struct pm8xxx_led_data, cdev);
 
-	Ledlog("LedLog > %s : %d %d\n",__func__, led->id, value);
-		
-        #if defined(LGE_PWM_LED)
-	if(led->id == PM8XXX_ID_LED_2 || led->id == PM8XXX_ID_LED_0)
-	{
+	if (likely(keyled_debug_mask & DEBUG_LED_TRACE))
+		printk("[leds-pm8xxx] pm8xxx_led_set : %d \n",value);
+
+#ifdef CONFIG_LGE_PM_PWM_LED
+	if (led->id == PM8XXX_ID_LED_2 || led->id == PM8XXX_ID_LED_0) {
 		idx_len0 = led->pwm_duty_cycles->num_duty_pcts0;
 		idx_len1 = led->pwm_duty_cycles->num_duty_pcts1;
 
-		if(value == 0xFE) //notification
-		{
+		if(value == 0xFE) { //notification
 			pm8xxx_pwm_lut_config(led->pwm_dev, led->pwm_period_us,
-			  led->pwm_duty_cycles->duty_pcts1,
-			  led->pwm_duty_cycles->duty_ms1,
-			  0, idx_len1, 0, 0,
-			  PM8XXX_LED_PWM_FLAGS);
-			value = led->cdev.max_brightness;
+				led->pwm_duty_cycles->duty_pcts1,
+				led->pwm_duty_cycles->duty_ms1,
+				0, idx_len1, 0, 0,
+				PM8XXX_LED_PWM_FLAGS);
+				value = led->cdev.max_brightness;
 		}
-		else //charging
-		{
+		else { //charging
 			pm8xxx_pwm_lut_config(led->pwm_dev, led->pwm_period_us,
 				led->pwm_duty_cycles->duty_pcts0,
 				led->pwm_duty_cycles->duty_ms0,
 				0, idx_len0, 0, 0,
-				PM8XXX_LED_PWM_FLAGS);		 
+				PM8XXX_LED_PWM_FLAGS);
 		}
 	}
-	#endif
+#endif
 
 	if (value < LED_OFF || value > led->cdev.max_brightness) {
 		dev_err(led->cdev.dev, "Invalid brightness value exceeds");
@@ -629,7 +692,7 @@ static int __devinit init_wled(struct pm8xxx_led_data *led)
 	/* program activation delay and maximum current */
 	for (i = 0; i < num_wled_strings; i++) {
 		rc = pm8xxx_readb(led->dev->parent,
-				WLED_MAX_CURR_CFG_REG(i + 2), &val);
+				WLED_MAX_CURR_CFG_REG(i), &val);
 		if (rc) {
 			dev_err(led->dev->parent, "can't read wled max current"
 				" config register rc=%d\n", rc);
@@ -654,10 +717,40 @@ static int __devinit init_wled(struct pm8xxx_led_data *led)
 		val = (val & ~WLED_MAX_CURR_MASK) | led->max_current;
 
 		rc = pm8xxx_writeb(led->dev->parent,
-				WLED_MAX_CURR_CFG_REG(i + 2), val);
+				WLED_MAX_CURR_CFG_REG(i), val);
 		if (rc) {
 			dev_err(led->dev->parent, "can't write wled max current"
 				" config register rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	if (led->wled_cfg->cabc_en) {
+		rc = pm8xxx_readb(led->dev->parent, WLED_SYNC_REG, &val);
+		if (rc) {
+			dev_err(led->dev->parent,
+				"can't read cabc register rc=%d\n", rc);
+			return rc;
+		}
+
+		switch (num_wled_strings) {
+		case ONE_WLED_STRING:
+			val |= (WLED_CABC_ONE_STRING << WLED_CABC_SHIFT);
+			break;
+		case TWO_WLED_STRINGS:
+			val |= (WLED_CABC_TWO_STRING << WLED_CABC_SHIFT);
+			break;
+		case THREE_WLED_STRINGS:
+			val |= (WLED_CABC_THREE_STRING << WLED_CABC_SHIFT);
+			break;
+		default:
+			break;
+		}
+
+		rc = pm8xxx_writeb(led->dev->parent, WLED_SYNC_REG, val);
+		if (rc) {
+			dev_err(led->dev->parent,
+				"can't write to enable cabc rc=%d\n", rc);
 			return rc;
 		}
 	}
@@ -692,35 +785,6 @@ static int __devinit init_wled(struct pm8xxx_led_data *led)
 	return 0;
 }
 
-static int __devinit init_rgb_led(struct pm8xxx_led_data *led)
-{
-	int rc;
-	u8 val;
-
-	rc = pm8xxx_readb(led->dev->parent, SSBI_REG_ADDR_RGB_CNTL1, &val);
-	if (rc) {
-		dev_err(led->cdev.dev, "can't read rgb ctrl1 register rc=%d\n",
-							rc);
-		return rc;
-	}
-
-	switch (led->id) {
-	case PM8XXX_ID_RGB_LED_RED:
-		val |= PM8XXX_DRV_RGB_RED_LED;
-		break;
-	case PM8XXX_ID_RGB_LED_GREEN:
-		val |= PM8XXX_DRV_RGB_GREEN_LED;
-		break;
-	case PM8XXX_ID_RGB_LED_BLUE:
-		val |= PM8XXX_DRV_RGB_BLUE_LED;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return pm8xxx_writeb(led->dev->parent, SSBI_REG_ADDR_RGB_CNTL1, val);
-}
-
 static int __devinit get_init_value(struct pm8xxx_led_data *led, u8 *val)
 {
 	int rc, offset;
@@ -751,12 +815,6 @@ static int __devinit get_init_value(struct pm8xxx_led_data *led, u8 *val)
 	case PM8XXX_ID_RGB_LED_RED:
 	case PM8XXX_ID_RGB_LED_GREEN:
 	case PM8XXX_ID_RGB_LED_BLUE:
-		rc = init_rgb_led(led);
-		if (rc) {
-			dev_err(led->cdev.dev, "can't initialize rgb rc=%d\n",
-								rc);
-			return rc;
-		}
 		addr = SSBI_REG_ADDR_RGB_CNTL1;
 		break;
 	default:
@@ -774,14 +832,11 @@ static int __devinit get_init_value(struct pm8xxx_led_data *led, u8 *val)
 
 static int pm8xxx_led_pwm_configure(struct pm8xxx_led_data *led)
 {
-	int start_idx, duty_us, rc;
-
-        #if defined(LGE_PWM_LED)
-        int idx_len0;
-	int idx_len1;
-	#else
-	int idx_len;
-	#endif
+#ifdef CONFIG_LGE_PM_PWM_LED
+	int start_idx, idx_len0, idx_len1, duty_us, rc;
+#else
+	int start_idx, idx_len, duty_us, rc;
+#endif
 
 	led->pwm_dev = pwm_request(led->pwm_channel,
 					led->cdev.name);
@@ -796,37 +851,36 @@ static int pm8xxx_led_pwm_configure(struct pm8xxx_led_data *led)
 
 	if (led->pwm_duty_cycles != NULL) {
 		start_idx = led->pwm_duty_cycles->start_idx;
-
-		#if defined(LGE_PWM_LED)
-	        idx_len0 = led->pwm_duty_cycles->num_duty_pcts0;
-	        idx_len1 = led->pwm_duty_cycles->num_duty_pcts1;
-        #else
+#ifdef CONFIG_LGE_PM_PWM_LED
+		idx_len0 = led->pwm_duty_cycles->num_duty_pcts0;
+		idx_len1 = led->pwm_duty_cycles->num_duty_pcts1;
+#else
 		idx_len = led->pwm_duty_cycles->num_duty_pcts;
-        #endif
+#endif
 
-        #if defined(LGE_PWM_LED)
-	        if (idx_len0 >= PM_PWM_LUT_SIZE && start_idx) {
-		   printk("Wrong LUT size or index\n");
-		   return -EINVAL;
-	        }
-	        if ((start_idx + idx_len0) > PM_PWM_LUT_SIZE) {
-		   printk("Exceed LUT limit\n");
-		   return -EINVAL;
-	        }
-	        if (idx_len1 >= PM_PWM_LUT_SIZE && start_idx) {
-		   printk("Wrong LUT size or index\n");
-	           return -EINVAL;
-	        }
-	        if ((start_idx + idx_len1) > PM_PWM_LUT_SIZE) {
-		   printk("Exceed LUT limit\n");
-		   return -EINVAL;
-	        }
-	        rc = pm8xxx_pwm_lut_config(led->pwm_dev, led->pwm_period_us,
+#ifdef CONFIG_LGE_PM_PWM_LED
+		if (idx_len0 >= PM_PWM_LUT_SIZE && start_idx) {
+			printk("Wrong LUT size or index\n");
+			return -EINVAL;
+		}
+		if ((start_idx + idx_len0) > PM_PWM_LUT_SIZE) {
+			printk("Exceed LUT limit\n");
+			return -EINVAL;
+		}
+		if (idx_len1 >= PM_PWM_LUT_SIZE && start_idx) {
+			printk("Wrong LUT size or index\n");
+			return -EINVAL;
+		}
+		if ((start_idx + idx_len1) > PM_PWM_LUT_SIZE) {
+			printk("Exceed LUT limit\n");
+			return -EINVAL;
+		}
+		rc = pm8xxx_pwm_lut_config(led->pwm_dev, led->pwm_period_us,
 				led->pwm_duty_cycles->duty_pcts0,
 				led->pwm_duty_cycles->duty_ms0,
 				start_idx, idx_len0, 0, 0,
 				PM8XXX_LED_PWM_FLAGS);
-        #else
+#else
 		if (idx_len >= PM_PWM_LUT_SIZE && start_idx) {
 			pr_err("Wrong LUT size or index\n");
 			return -EINVAL;
@@ -841,7 +895,7 @@ static int pm8xxx_led_pwm_configure(struct pm8xxx_led_data *led)
 				led->pwm_duty_cycles->duty_ms,
 				start_idx, idx_len, 0, 0,
 				PM8XXX_LED_PWM_FLAGS);
-       #endif
+#endif
 	} else {
 		duty_us = led->pwm_period_us;
 		rc = pwm_config(led->pwm_dev, duty_us, led->pwm_period_us);
@@ -861,6 +915,8 @@ static int __devinit pm8xxx_led_probe(struct platform_device *pdev)
 	enum pm8xxx_version version;
 	bool found = false;
 	int rc, i, j;
+
+	printk("[leds_pm8xxx] pm8xxx_led_probe start\n");
 
 	if (pdata == NULL) {
 		dev_err(&pdev->dev, "platform data not supplied\n");
@@ -977,6 +1033,7 @@ static int __devinit pm8xxx_led_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, led);
+	printk("[leds_pm8xxx] pm8xxx_led_probe end\n");
 
 	return 0;
 

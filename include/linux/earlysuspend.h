@@ -42,7 +42,6 @@ struct early_suspend {
 	void (*suspend)(struct early_suspend *h);
 	void (*resume)(struct early_suspend *h);
 #endif
-//LGE_CHANGE_S, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 #ifdef CONFIG_LGE_EARLYSUSPEND_FUNC_TIME
 	int resume_avg;
 	int resume_max;
@@ -51,7 +50,6 @@ struct early_suspend {
 	int suspend_max;
 	int suspend_count;
 #endif
-//LGE_CHANGE_E, [inho.oh@lge.com] , 2012-04-10, SuspendEarlySuspend debugfs
 };
 
 #ifdef CONFIG_HAS_EARLYSUSPEND

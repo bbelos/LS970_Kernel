@@ -25,8 +25,11 @@
 #define SUB_UNKNOWN	0x0140
 #endif
 
-#ifdef CONFIG_MSM_NATIVE_RESTART
+#if defined(CONFIG_MSM_NATIVE_RESTART)
 void msm_set_restart_mode(int mode);
+void msm_restart(char mode, const char *cmd);
+#elif defined(CONFIG_ARCH_FSM9XXX)
+void fsm_restart(char mode, const char *cmd);
 #else
 #define msm_set_restart_mode(mode)
 #endif

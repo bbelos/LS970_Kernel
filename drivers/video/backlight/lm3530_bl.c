@@ -80,8 +80,10 @@ static int saved_main_lcd_level;
 static int backlight_status = BL_ON;
 
 static struct lm3530_device *main_lm3530_dev;
+#if 0
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static struct early_suspend early_suspend;
+#endif
 #endif
 static struct early_suspend * h;
 
@@ -99,6 +101,7 @@ static void lm3530_hw_reset(void)
 static int lm3530_write_reg(struct i2c_client *client,
 		unsigned char reg, unsigned char val)
 {
+    int ret = 0;
 	u8 buf[2];
 	struct i2c_msg msg = {
 		client->addr, 0, 2, buf
@@ -107,12 +110,14 @@ static int lm3530_write_reg(struct i2c_client *client,
 	buf[0] = reg;
 	buf[1] = val;
 
-	if (i2c_transfer(client->adapter, &msg, 1) < 0)
-		dev_err(&client->dev, "i2c write error\n");
+	if ((ret = i2c_transfer(client->adapter, &msg, 1)) < 0)
+		dev_err(&client->dev, "i2c write error, ret = %d\n", ret);
 
-	return 0;
+	return ret;
 }
 
+ //EJJ_ORG 0911 Exp. based LUT 0911
+/*
 //LGE_UPDATE_S hojin.ryu@lge.com Exponential BL mapping table 20120828
 static char mapped_value[146] = {
 	54, 54, 54, 54, 54, 54, 55, 55, 55, 56, 56, 57, 57, 57, 58, 58, 59, 59,
@@ -125,6 +130,21 @@ static char mapped_value[146] = {
 	115, 115, 115, 116, 116, 116, 117, 117, 118, 118, 118, 119, 119, 119, 119,
 	120, 120, 120, 121, 121, 121, 121, 122, 122, 122, 123, 123};
 //LGE_UPDATE_S hojin.ryu@lge.com Exponential BL mapping table 20120828
+ //EJJ_ORG 0911 
+ */
+//EJJ_ADD 0921 Linear based Tune #3
+	static char mapped_value[146] = {	
+		1 	,1 	,1 	,1 	,1 	,1 	,1 	,1 	,1 	,1 	,1 	,1 	,2 	,2 	,2,
+		2 	,2 	,2 	,2 	,2 	,2 	,2 	,2 	,3 	,3 	,3 	,3 	,3 	,3 	,3,
+		4 	,4 	,4 	,4 	,4 	,4 	,5 	,5 	,5 	,6 	,6 	,6 	,7	,7 	,7,
+		8 	,8 	,8 	,9 	,9 	,9 	,10	,10	,11	,11	,11	,12	,12	,13	,13,
+		14 	,14 ,15	,15	,16	,16	,16	,17	,17	,18	,18	,19	,19	,19	,20,
+		20 	,21 ,22	,22	,23	,24	,24	,25	,26	,26	,27	,28	,29	,30	,30 ,
+		31 	,32 ,33	,34	,34	,35	,36	,37	,38	,39	,40	,41	,41	,42	,43,
+		44 	,45 ,46	,47	,48	,49	,50	,51	,52	,53	,54	,56	,57	,58	,59,
+		60 	,61 ,62	,63	,65	,66	,67	,69	,70	,71	,72	,73	,74	,76	,78,
+		79 	,80 ,82	,83	,85	,87	,88	,90	,91	,92	,94 };
+//EJJ_ADD 0921 Linear based Tune #3
 
 //LGE_UPDATE_S hojin.ryu@lge.com Exponential BL level applied 20120731
 static void lm3530_set_main_current_level(struct i2c_client *client, int level)
@@ -151,8 +171,7 @@ static void lm3530_set_main_current_level(struct i2c_client *client, int level)
 
 		cur_main_lcd_level = cal_value;
 		lm3530_write_reg(client, 0xA0, cal_value);
-		/* printk("%s() :level is : %d, cal_value is :
-		 * 0x%x\n", __func__, level, cal_value); */
+		 printk("%s() :level is : %d, cal_value is :* %d\n", __func__, level, cal_value); 
 	} else
 		lm3530_write_reg(client, 0x10, 0x00);
 
@@ -174,16 +193,17 @@ void lm3530_backlight_on(int level)
 		/* reset 0 brightness */
 		lm3530_write_reg(main_lm3530_dev->client, 0x10,
 				main_lm3530_dev->max_current);
-		lm3530_write_reg(main_lm3530_dev->client, 0x30, 0x00);
+		//EJJ_ORG lm3530_write_reg(main_lm3530_dev->client, 0x30, 0x00);
+		lm3530_write_reg(main_lm3530_dev->client, 0x30, 0x03);	//EJJ_MOD ABS : Insensitive Brightness Transition, 0x03 Ramp rate : rising 32us/step, falling 16.384ms/step , Full scale 508ms
 		/* fade in, out */
 
-		/* msleep(100); */
+        backlight_status = BL_ON;
+        /* msleep(100); */
 	}
 
 	/* printk("%s received (prev backlight_status: %s)\n",
 	 * __func__, backlight_status?"ON":"OFF");*/
 	lm3530_set_main_current_level(main_lm3530_dev->client, level);
-	backlight_status = BL_ON;
 
 	return;
 }
@@ -191,8 +211,8 @@ void lm3530_backlight_on(int level)
 void lm3530_backlight_off(struct early_suspend * h)
 {
 	int gpio = main_lm3530_dev->gpio;
-printk("%s, backlight_status : %d\n",__func__,backlight_status);
-	if (backlight_status == BL_OFF)
+    printk("%s, backlight_status : %d\n",__func__,backlight_status);
+    if (backlight_status == BL_OFF)
 		return;
 	saved_main_lcd_level = cur_main_lcd_level;
 	lm3530_set_main_current_level(main_lm3530_dev->client, 0);
@@ -368,11 +388,12 @@ static int __devinit lm3530_probe(struct i2c_client *i2c_dev,
 	err = device_create_file(&i2c_dev->dev,
 			&dev_attr_lm3530_backlight_on_off);
 
+#if 0
 #ifdef CONFIG_HAS_EARLYSUSPEND
        early_suspend.suspend = lm3530_backlight_off;
        register_early_suspend(&early_suspend);
 #endif
-
+#endif
 
 	return 0;
 }

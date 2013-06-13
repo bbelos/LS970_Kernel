@@ -176,16 +176,27 @@ module_exit(slimbus_exit);
 static int slim_drv_probe(struct device *dev)
 {
 	const struct slim_driver *sdrv = to_slim_driver(dev->driver);
+	struct slim_device *sbdev = to_slim_device(dev);
+	struct slim_controller *ctrl = sbdev->ctrl;
 
-	if (sdrv->probe)
-		return sdrv->probe(to_slim_device(dev));
+	if (sdrv->probe) {
+		int ret;
+		ret = sdrv->probe(sbdev);
+		if (ret)
+			return ret;
+		if (sdrv->device_up)
+			queue_work(ctrl->wq, &sbdev->wd);
+		return 0;
+	}
 	return -ENODEV;
 }
 
 static int slim_drv_remove(struct device *dev)
 {
 	const struct slim_driver *sdrv = to_slim_driver(dev->driver);
+	struct slim_device *sbdev = to_slim_device(dev);
 
+	sbdev->notified = false;
 	if (sdrv->remove)
 		return sdrv->remove(to_slim_device(dev));
 	return -ENODEV;
@@ -263,6 +274,23 @@ static struct device_type slim_dev_type = {
 	.release	= slim_dev_release,
 };
 
+static void slim_report_present(struct work_struct *work)
+{
+	u8 laddr;
+	int ret;
+	struct slim_driver *sbdrv;
+	struct slim_device *sbdev =
+			container_of(work, struct slim_device, wd);
+	if (sbdev->notified || !sbdev->dev.driver)
+		return;
+	ret = slim_get_logical_addr(sbdev, sbdev->e_addr, 6, &laddr);
+	sbdrv = to_slim_driver(sbdev->dev.driver);
+	if (!ret && sbdrv->device_up) {
+		sbdev->notified = true;
+		sbdrv->device_up(sbdev);
+	}
+}
+
 /*
  * slim_add_device: Add a new device without register board info.
  * @ctrl: Controller to which this device is to be added to.
@@ -271,25 +299,23 @@ static struct device_type slim_dev_type = {
  */
 int slim_add_device(struct slim_controller *ctrl, struct slim_device *sbdev)
 {
-	int ret = 0;
-
 	sbdev->dev.bus = &slimbus_type;
 	sbdev->dev.parent = ctrl->dev.parent;
 	sbdev->dev.type = &slim_dev_type;
+	sbdev->dev.driver = NULL;
 	sbdev->ctrl = ctrl;
 	slim_ctrl_get(ctrl);
 	dev_set_name(&sbdev->dev, "%s", sbdev->name);
-	/* probe slave on this controller */
-	ret = device_register(&sbdev->dev);
-
-	if (ret)
-		return ret;
-
 	mutex_init(&sbdev->sldev_reconf);
 	INIT_LIST_HEAD(&sbdev->mark_define);
 	INIT_LIST_HEAD(&sbdev->mark_suspend);
 	INIT_LIST_HEAD(&sbdev->mark_removal);
-	return 0;
+	INIT_WORK(&sbdev->wd, slim_report_present);
+	mutex_lock(&ctrl->m_ctrl);
+	list_add_tail(&sbdev->dev_list, &ctrl->devs);
+	mutex_unlock(&ctrl->m_ctrl);
+	/* probe slave on this controller */
+	return device_register(&sbdev->dev);
 }
 EXPORT_SYMBOL_GPL(slim_add_device);
 
@@ -347,6 +373,24 @@ int slim_register_board_info(struct slim_boardinfo const *info, unsigned n)
 EXPORT_SYMBOL_GPL(slim_register_board_info);
 
 /*
+ * slim_ctrl_add_boarddevs: Add devices registered by board-info
+ * @ctrl: Controller to which these devices are to be added to.
+ * This API is called by controller when it is up and running.
+ * If devices on a controller were registered before controller,
+ * this will make sure that they get probed when controller is up.
+ */
+void slim_ctrl_add_boarddevs(struct slim_controller *ctrl)
+{
+	struct sbi_boardinfo *bi;
+	mutex_lock(&board_lock);
+	list_add_tail(&ctrl->list, &slim_ctrl_list);
+	list_for_each_entry(bi, &board_list, list)
+		slim_match_ctrl_to_boardinfo(ctrl, &bi->board_info);
+	mutex_unlock(&board_lock);
+}
+EXPORT_SYMBOL_GPL(slim_ctrl_add_boarddevs);
+
+/*
  * slim_busnum_to_ctrl: Map bus number to controller
  * @busnum: Bus number
  * Returns controller representing this bus number
@@ -368,7 +412,6 @@ EXPORT_SYMBOL_GPL(slim_busnum_to_ctrl);
 static int slim_register_controller(struct slim_controller *ctrl)
 {
 	int ret = 0;
-	struct sbi_boardinfo *bi;
 
 	/* Can't register until after driver model init */
 	if (WARN_ON(!slimbus_type.p)) {
@@ -431,18 +474,18 @@ static int slim_register_controller(struct slim_controller *ctrl)
 	ctrl->sched.slots = kzalloc(SLIM_SL_PER_SUPERFRAME, GFP_KERNEL);
 #endif
 	init_completion(&ctrl->pause_comp);
-	/*
-	 * If devices on a controller were registered before controller,
-	 * this will make sure that they get probed now that controller is up
-	 */
-	mutex_lock(&board_lock);
-	list_add_tail(&ctrl->list, &slim_ctrl_list);
-	list_for_each_entry(bi, &board_list, list)
-		slim_match_ctrl_to_boardinfo(ctrl, &bi->board_info);
-	mutex_unlock(&board_lock);
+
+	INIT_LIST_HEAD(&ctrl->devs);
+	ctrl->wq = create_singlethread_workqueue(dev_name(&ctrl->dev));
+	if (!ctrl->wq)
+		goto err_workq_failed;
 
 	return 0;
 
+err_workq_failed:
+	kfree(ctrl->sched.chc3);
+	kfree(ctrl->sched.chc1);
+	kfree(ctrl->chans);
 err_chan_failed:
 	kfree(ctrl->ports);
 err_port_failed:
@@ -495,6 +538,7 @@ int slim_del_controller(struct slim_controller *ctrl)
 
 	wait_for_completion(&ctrl->dev_released);
 	list_del(&ctrl->list);
+	destroy_workqueue(ctrl->wq);
 	/* free bus id */
 	mutex_lock(&slim_lock);
 	idr_remove(&ctrl_idr, ctrl->nr);
@@ -665,7 +709,8 @@ int slim_assign_laddr(struct slim_controller *ctrl, const u8 *e_addr,
 				u8 e_len, u8 *laddr)
 {
 	int ret;
-	u8 i;
+	u8 i = 0;
+	struct slim_device *sbdev;
 	mutex_lock(&ctrl->m_ctrl);
 	/* already assigned */
 	if (ctrl_getlogical_addr(ctrl, e_addr, e_len, laddr) == 0)
@@ -704,7 +749,25 @@ int slim_assign_laddr(struct slim_controller *ctrl, const u8 *e_addr,
 	dev_dbg(&ctrl->dev, "setting slimbus l-addr:%x\n", i);
 ret_assigned_laddr:
 	mutex_unlock(&ctrl->m_ctrl);
-	return ret;
+	if (ret)
+		return ret;
+
+	pr_info("slimbus laddr:0x%x, EAPC:0x%x:0x%x", i,
+				e_addr[1], e_addr[2]);
+	mutex_lock(&ctrl->m_ctrl);
+	list_for_each_entry(sbdev, &ctrl->devs, dev_list) {
+		if (memcmp(sbdev->e_addr, e_addr, 6) == 0) {
+			struct slim_driver *sbdrv;
+			if (sbdev->dev.driver) {
+				sbdrv = to_slim_driver(sbdev->dev.driver);
+				if (sbdrv->device_up)
+					queue_work(ctrl->wq, &sbdev->wd);
+			}
+			break;
+		}
+	}
+	mutex_unlock(&ctrl->m_ctrl);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(slim_assign_laddr);
 
@@ -920,6 +983,15 @@ int slim_xfer_msg(struct slim_controller *ctrl, struct slim_device *sbdev,
 				ret = -ETIMEDOUT;
 			} else
 				ret = 0;
+		} else if (ret < 0 && !msg->comp) {
+			struct slim_msg_txn *txn;
+			dev_err(&ctrl->dev, "slimbus Read error");
+			mutex_lock(&ctrl->m_ctrl);
+			txn = ctrl->txnt[tid];
+			/* Invalidate the transaction */
+			ctrl->txnt[tid] = NULL;
+			mutex_unlock(&ctrl->m_ctrl);
+			kfree(txn);
 		}
 
 	} else
@@ -2530,7 +2602,6 @@ int slim_reconfigure_now(struct slim_device *sb)
 			struct slim_ich *slc;
 			pch = list_entry(pos, struct slim_pending_ch, pending);
 			slc = &ctrl->chans[pch->chan];
-			pr_info("chan removal:%d", slc->chan);
 			if (slc->def > 0)
 				slc->def--;
 			/* Disconnect source port to free it up */
@@ -2780,9 +2851,12 @@ int slim_control_ch(struct slim_device *sb, u16 chanh,
 	mutex_lock(&sb->sldev_reconf);
 	mutex_lock(&ctrl->m_ctrl);
 	do {
+		struct slim_pending_ch *pch;
+		u8 add_mark_removal  = true;
+
 		slc = &ctrl->chans[chan];
-		pr_err("chan:%d,ctrl:%d,def:%d, ref:%d", slc->chan,
-				chctrl, slc->def, slc->ref);
+		dev_dbg(&ctrl->dev, "chan:%d,ctrl:%d,def:%d", chan, chctrl,
+					slc->def);
 		if (slc->state < SLIM_CH_DEFINED) {
 			ret = -ENOTCONN;
 			break;
@@ -2804,9 +2878,30 @@ int slim_control_ch(struct slim_device *sb, u16 chanh,
 				ret = -ENOTCONN;
 				break;
 			}
-			ret = add_pending_ch(&sb->mark_removal, chan);
-			if (ret)
-				break;
+			/* If channel removal request comes when pending
+			 * in the mark_define, remove it from the define
+			 * list instead of adding it to removal list
+			 */
+			if (!list_empty(&sb->mark_define)) {
+				struct list_head *pos, *next;
+				list_for_each_safe(pos, next,
+						  &sb->mark_define) {
+					pch = list_entry(pos,
+						struct slim_pending_ch,
+						pending);
+					if (pch->chan == slc->chan) {
+						list_del(&pch->pending);
+						kfree(pch);
+						add_mark_removal = false;
+						break;
+					}
+				}
+			}
+			if (add_mark_removal == true) {
+				ret = add_pending_ch(&sb->mark_removal, chan);
+				if (ret)
+					break;
+			}
 		}
 
 		if (!(slc->nextgrp & SLIM_END_GRP))

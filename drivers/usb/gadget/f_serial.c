@@ -230,6 +230,34 @@ static struct usb_descriptor_header *gser_hs_function[] = {
 	NULL,
 };
 
+static struct usb_endpoint_descriptor gser_ss_in_desc __initdata = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_endpoint_descriptor gser_ss_out_desc __initdata = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor gser_ss_bulk_comp_desc __initdata = {
+	.bLength =              sizeof gser_ss_bulk_comp_desc,
+	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
+};
+
+static struct usb_descriptor_header *gser_ss_function[] __initdata = {
+	(struct usb_descriptor_header *) &gser_interface_desc,
+	(struct usb_descriptor_header *) &gser_ss_in_desc,
+	(struct usb_descriptor_header *) &gser_ss_bulk_comp_desc,
+	(struct usb_descriptor_header *) &gser_ss_out_desc,
+	(struct usb_descriptor_header *) &gser_ss_bulk_comp_desc,
+	NULL,
+};
+
 /* string descriptors: */
 
 static struct usb_string gser_string_defs[] = {
@@ -524,7 +552,7 @@ static int gser_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	if (!gser->port.in->desc || !gser->port.out->desc) {
 		DBG(cdev, "activate generic ttyGS%d\n", gser->port_num);
 		if (config_ep_by_speed(cdev->gadget, f, gser->port.in) ||
-			config_ep_by_speed(cdev->gadget, f, gser->port.out)) {
+		    config_ep_by_speed(cdev->gadget, f, gser->port.out)) {
 			gser->port.in->desc = NULL;
 			gser->port.out->desc = NULL;
 			return -EINVAL;
@@ -549,6 +577,7 @@ static void gser_disable(struct usb_function *f)
 #ifdef CONFIG_MODEM_SUPPORT
 	usb_ep_fifo_flush(gser->notify);
 	usb_ep_disable(gser->notify);
+	gser->notify->driver_data = NULL;
 #endif
 	gser->online = 0;
 }
@@ -795,9 +824,21 @@ gser_bind(struct usb_configuration *c, struct usb_function *f)
 			goto fail;
 
 	}
+	if (gadget_is_superspeed(c->cdev->gadget)) {
+		gser_ss_in_desc.bEndpointAddress =
+			gser_fs_in_desc.bEndpointAddress;
+		gser_ss_out_desc.bEndpointAddress =
+			gser_fs_out_desc.bEndpointAddress;
+
+		/* copy descriptors, and track endpoint copies */
+		f->ss_descriptors = usb_copy_descriptors(gser_ss_function);
+		if (!f->ss_descriptors)
+			goto fail;
+	}
 
 	DBG(cdev, "generic ttyGS%d: %s speed IN/%s OUT/%s\n",
 			gser->port_num,
+			gadget_is_superspeed(c->cdev->gadget) ? "super" :
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			gser->port.in->name, gser->port.out->name);
 	return 0;
@@ -832,6 +873,8 @@ gser_unbind(struct usb_configuration *c, struct usb_function *f)
 #endif
 	if (gadget_is_dualspeed(c->cdev->gadget))
 		usb_free_descriptors(f->hs_descriptors);
+	if (gadget_is_superspeed(c->cdev->gadget))
+		usb_free_descriptors(f->ss_descriptors);
 	usb_free_descriptors(f->descriptors);
 #ifdef CONFIG_MODEM_SUPPORT
 	gs_free_req(gser->notify, gser->notify_req);

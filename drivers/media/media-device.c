@@ -23,6 +23,7 @@
 #include <linux/types.h>
 #include <linux/ioctl.h>
 #include <linux/media.h>
+#include <linux/export.h>
 
 #include <media/media-device.h>
 #include <media/media-devnode.h>
@@ -107,8 +108,7 @@ static long media_device_enum_entities(struct media_device *mdev,
 	u_ent.group_id = ent->group_id;
 	u_ent.pads = ent->num_pads;
 	u_ent.links = ent->num_links - ent->num_backlinks;
-	u_ent.v4l.major = ent->v4l.major;
-	u_ent.v4l.minor = ent->v4l.minor;
+	memcpy(&u_ent.raw, &ent->info, sizeof(ent->info));
 	if (copy_to_user(uent, &u_ent, sizeof(u_ent)))
 		return -EFAULT;
 	return 0;
@@ -210,18 +210,18 @@ static long media_device_setup_link(struct media_device *mdev,
 	return ret;
 }
 
-    /* LGE_CHANGE_S, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_S, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 int sub_cam_id_for_keep_screen_on = -1;
-    /* LGE_CHANGE_E, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_E, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 static long media_device_ioctl(struct file *filp, unsigned int cmd,
 			       unsigned long arg)
 {
 	struct media_devnode *devnode = media_devnode_data(filp);
 	struct media_device *dev = to_media_device(devnode);
 	long ret;
-    /* LGE_CHANGE_S, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_S, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 	void __user *argp = (void __user *)arg;
-    /* LGE_CHANGE_E, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_E, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 
 	switch (cmd) {
 	case MEDIA_IOC_DEVICE_INFO:
@@ -248,17 +248,15 @@ static long media_device_ioctl(struct file *filp, unsigned int cmd,
 		mutex_unlock(&dev->graph_mutex);
 		break;
 
-    /* LGE_CHANGE_S, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_S, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 	case MEDIA_IOC_SUB_CAM_ID:
 		if (copy_from_user(&sub_cam_id_for_keep_screen_on, argp, sizeof(sub_cam_id_for_keep_screen_on))) {
-//			pr_err("==============> dr.ryu %s MEDIA_IOC_SUB_CAM_ID : error\n", __func__);
 			ret = -EFAULT;
 		} else {
-//			pr_err("==============> dr.ryu %s : MEDIA_IOC_SUB_CAM_ID : SET sub_cam_id_for_keep_screen_on : %d\n", __func__, sub_cam_id_for_keep_screen_on);
 			ret = 0;
-		}	
+		}
 		break;
-    /* LGE_CHANGE_E, dr.ryu@lge.com, 2012-08-02, KeepScreenOn*/
+    /* LGE_CHANGE_E, soojung.lim@lge.com, 2012-10-31, Wise screen / Because of the display engine  */
 	default:
 		ret = -ENOIOCTLCMD;
 	}

@@ -146,7 +146,7 @@ struct mmc_platform_data {
 	unsigned int uhs_caps2;
 	void (*sdio_lpm_gpio_setup)(struct device *, unsigned int);
         unsigned int status_irq;
-	unsigned int status_gpio;
+	int status_gpio;
 	/* Indicates the polarity of the GPIO line when card is inserted */
 	bool is_status_gpio_active_low;
         unsigned int sdiowakeup_irq;
@@ -157,10 +157,9 @@ struct mmc_platform_data {
 	unsigned int msmsdcc_fmid;
 	unsigned int msmsdcc_fmax;
 	bool nonremovable;
-	bool pclk_src_dfab;
 	unsigned int mpm_sdiowakeup_int;
-	unsigned int wpswitch_gpio;
-	unsigned char wpswitch_polarity;
+	int wpswitch_gpio;
+	bool is_wpswitch_active_low;
 	struct msm_mmc_slot_reg_data *vreg_data;
 	int is_sdio_al_client;
 	unsigned int *sup_clk_table;
@@ -171,6 +170,7 @@ struct mmc_platform_data {
 	bool disable_cmd23;
 	u32 cpu_dma_latency;
 	struct msm_mmc_bus_voting_data *msm_bus_voting_data;
+	bool hw_rev_sd_low;
 };
 
 #endif

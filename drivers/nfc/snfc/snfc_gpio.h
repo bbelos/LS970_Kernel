@@ -34,7 +34,7 @@ enum{
 #define GPIO_SNFC_PON		37  	//IMA_PON
 
 /* snfc_rfs */
-#define GPIO_SNFC_RFS   	55		//IMA_CDET
+#define GPIO_SNFC_RFS   	84		//IMA_CDET
 
 /* snfc_int */
 #define GPIO_SNFC_INT   	22		//IMA_INT
@@ -43,8 +43,11 @@ enum{
 #define GPIO_SNFC_INTU   	23		//IMA_INTU
 
 /* snfc_hsel */
+#ifdef CONFIG_CXD2235AGG_GJ_KDDI
 #define GPIO_SNFC_HSEL		57		//NFC_HSEL
-
+#else
+#define GPIO_SNFC_HSEL		69		//NFC_HSEL
+#endif
 
 #define SNFC_GPIO_CFG(gpio, func, dir, pull, drvstr) \
     ((((gpio) & 0x3FF) << 4)        |   \
@@ -53,6 +56,7 @@ enum{
     (((pull) & 0x3) << 15)          |   \
     (((drvstr) & 0xF) << 17))
 
+extern int gpio_rfs;
 
 /*
  *	FUNCTION PROTOTYPE

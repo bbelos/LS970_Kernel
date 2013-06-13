@@ -2,6 +2,7 @@
  *
  * Copyright (C) 2007 Google, Inc.
  * Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012, LGE.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -24,19 +25,19 @@
 
 /* Ref resistance value = 665K */
 #define ADC_NO_INIT_CABLE   0
-#define ADC_CABLE_MHL_1K    5000
-#define ADC_CABLE_U_28P7K   5500/* This value is obsolete */
-#define ADC_CABLE_28P7K     6000/* min value of 56K is so low because of factory cable issue */
-#define ADC_CABLE_56K       175000
-#define ADC_CABLE_100K      260000
-#define ADC_CABLE_130K      335000
-#define ADC_CABLE_180K      395000
-#define ADC_CABLE_200K		425000
-#define ADC_CABLE_220K      475000
-#define ADC_CABLE_270K      550000
-#define ADC_CABLE_330K      725000
-#define ADC_CABLE_620K      945000
-#define ADC_CABLE_910K      1130000
+#define ADC_CABLE_MHL_1K    30000
+#define ADC_CABLE_U_28P7K   60000
+#define ADC_CABLE_28P7K     110000
+#define ADC_CABLE_56K       185000
+#define ADC_CABLE_100K      265000
+#define ADC_CABLE_130K      340000
+#define ADC_CABLE_180K      400000
+#define ADC_CABLE_200K      431000
+#define ADC_CABLE_220K      485000
+#define ADC_CABLE_270K      560000
+#define ADC_CABLE_330K      735000
+#define ADC_CABLE_620K      955000
+#define ADC_CABLE_910K      1140000
 #define ADC_CABLE_NONE      1800000
 
 /* Ref resistance value = 200K */
@@ -70,7 +71,7 @@
 #define C_330K_TA_MA        500
 #define C_620K_TA_MA        500
 #define C_910K_TA_MA        1500//[ORG]500
-#define C_NONE_TA_MA        500 // Adaptive current from 500mA to 900mA
+#define C_NONE_TA_MA        900 //900mA for open cable
 
 #define C_NO_INIT_USB_MA    0
 #define C_MHL_1K_USB_MA     500

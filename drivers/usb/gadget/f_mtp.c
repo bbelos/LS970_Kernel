@@ -630,9 +630,8 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 	/* we need to send a zero length packet to signal the end of transfer
 	 * if the transfer size is aligned to a packet boundary.
 	 */
-	if ((count & (dev->ep_in->maxpacket - 1)) == 0) {
+	if ((count & (dev->ep_in->maxpacket - 1)) == 0)
 		sendZLP = 1;
-	}
 
 	while (count > 0 || sendZLP) {
 		/* so we exit after sending ZLP */
@@ -700,8 +699,10 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 }
 
 /* read from a local file and write to USB */
-static void send_file_work(struct work_struct *data) {
-	struct mtp_dev	*dev = container_of(data, struct mtp_dev, send_file_work);
+static void send_file_work(struct work_struct *data)
+{
+	struct mtp_dev *dev = container_of(data, struct mtp_dev,
+						send_file_work);
 #ifndef CONFIG_USB_G_LGE_ANDROID
 	struct usb_composite_dev *cdev = dev->cdev;
 #endif
@@ -734,9 +735,8 @@ static void send_file_work(struct work_struct *data) {
 	/* we need to send a zero length packet to signal the end of transfer
 	 * if the transfer size is aligned to a packet boundary.
 	 */
-	if ((count & (dev->ep_in->maxpacket - 1)) == 0) {
+	if ((count & (dev->ep_in->maxpacket - 1)) == 0)
 		sendZLP = 1;
-	}
 
 	while (count > 0 || sendZLP) {
 		/* so we exit after sending ZLP */
@@ -768,10 +768,12 @@ static void send_file_work(struct work_struct *data) {
 			header->length = __cpu_to_le32(count);
 			header->type = __cpu_to_le16(2); /* data packet */
 			header->command = __cpu_to_le16(dev->xfer_command);
-			header->transaction_id = __cpu_to_le32(dev->xfer_transaction_id);
+			header->transaction_id =
+					__cpu_to_le32(dev->xfer_transaction_id);
 		}
 
-		ret = vfs_read(filp, req->buf + hdr_size, xfer - hdr_size, &offset);
+		ret = vfs_read(filp, req->buf + hdr_size, xfer - hdr_size,
+								&offset);
 		if (ret < 0) {
 			r = ret;
 			break;
@@ -811,7 +813,8 @@ static void send_file_work(struct work_struct *data) {
 /* read from USB and write to a local file */
 static void receive_file_work(struct work_struct *data)
 {
-	struct mtp_dev	*dev = container_of(data, struct mtp_dev, receive_file_work);
+	struct mtp_dev *dev = container_of(data, struct mtp_dev,
+						receive_file_work);
 #ifndef CONFIG_USB_G_LGE_ANDROID
 	struct usb_composite_dev *cdev = dev->cdev;
 #endif
@@ -872,7 +875,8 @@ static void receive_file_work(struct work_struct *data)
 			/* wait for our last read to complete */
 			ret = wait_event_interruptible(dev->read_wq,
 				dev->rx_done || dev->state != STATE_BUSY);
-			if (dev->state == STATE_CANCELED) {
+			if (dev->state == STATE_CANCELED
+					|| dev->state == STATE_OFFLINE) {
 				r = -ECANCELED;
 				if (!dev->rx_done)
 					usb_ep_dequeue(dev->ep_out, read_req);
@@ -884,7 +888,10 @@ static void receive_file_work(struct work_struct *data)
 			if (count != 0xFFFFFFFF)
 				count -= read_req->actual;
 			if (read_req->actual < read_req->length) {
-				/* short packet is used to signal EOF for sizes > 4 gig */
+				/*
+				 * short packet is used to signal EOF for
+				 * sizes > 4 gig
+				 */
 #ifndef CONFIG_USB_G_LGE_ANDROID
 				DBG(cdev, "got short packet\n");
 #endif
@@ -906,7 +913,7 @@ static void receive_file_work(struct work_struct *data)
 
 static int mtp_send_event(struct mtp_dev *dev, struct mtp_event *event)
 {
-	struct usb_request *req= NULL;
+	struct usb_request *req = NULL;
 	int ret;
 	int length = event->length;
 
@@ -920,9 +927,10 @@ static int mtp_send_event(struct mtp_dev *dev, struct mtp_event *event)
 		return -ENODEV;
 
 	ret = wait_event_interruptible_timeout(dev->intr_wq,
-		(req = mtp_req_get(dev, &dev->intr_idle)), msecs_to_jiffies(1000));
+			(req = mtp_req_get(dev, &dev->intr_idle)),
+			msecs_to_jiffies(1000));
 	if (!req)
-	    return -ETIME;
+		return -ETIME;
 
 	if (copy_from_user(req->buf, (void __user *)event->data, length)) {
 		mtp_req_put(dev, &dev->intr_idle, req);
@@ -1125,8 +1133,14 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 			ctrl->bRequest, w_index, w_value, w_length);
 #endif
 
+#ifdef CONFIG_USB_G_LGE_ANDROID
+		if (ctrl->bRequest == MTP_REQ_CANCEL && w_index == mtp_interface_desc.bInterfaceNumber
+				&& w_value == 0) {
+#else
 		if (ctrl->bRequest == MTP_REQ_CANCEL && w_index == 0
 				&& w_value == 0) {
+#endif
+
 #ifndef CONFIG_USB_G_LGE_ANDROID
 			DBG(cdev, "MTP_REQ_CANCEL\n");
 #endif
@@ -1144,8 +1158,13 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 			 * the contents.
 			 */
 			value = w_length;
+#ifdef CONFIG_USB_G_LGE_ANDROID
+		} else if (ctrl->bRequest == MTP_REQ_GET_DEVICE_STATUS
+				&& w_index == mtp_interface_desc.bInterfaceNumber && w_value == 0) {
+#else
 		} else if (ctrl->bRequest == MTP_REQ_GET_DEVICE_STATUS
 				&& w_index == 0 && w_value == 0) {
+#endif
 			struct mtp_device_status *status = cdev->req->buf;
 			status->wLength =
 				__constant_cpu_to_le16(sizeof(*status));
@@ -1175,7 +1194,7 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 		cdev->req->length = value;
 		rc = usb_ep_queue(cdev->gadget->ep0, cdev->req, GFP_ATOMIC);
 		if (rc < 0)
-			ERROR(cdev, "%s setup response queue error\n", __func__);
+			ERROR(cdev, "%s: response queue error\n", __func__);
 	}
 	return value;
 }

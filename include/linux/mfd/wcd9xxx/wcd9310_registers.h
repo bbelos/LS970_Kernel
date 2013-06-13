@@ -280,7 +280,14 @@
 #define TABLA_A_TX_3_4_SAR_ERR_CH4			(0x0166)
 #define TABLA_A_TX_3_4_SAR_ERR_CH4__POR			(0x00000000)
 #define TABLA_A_TX_5_6_EN			(0x0167)
+//[AUDIO_BSP][3rd MIC] gooyeon.jung@lge.com 2012-10-16 set capless mode on MIC_IN_5 & 6. [START]
+#if defined(CONFIG_SND_SOC_3rd_MIC_AMIC) && \
+	( defined(CONFIG_MACH_APQ8064_GVDCM)||defined(CONFIG_MACH_APQ8064_GK_KR)||defined(CONFIG_MACH_APQ8064_GKATT) )
+#define TABLA_A_TX_5_6_EN__POR			(0x00000000)
+#else /* QCT original code */
 #define TABLA_A_TX_5_6_EN__POR			(0x00000011)
+#endif
+//[AUDIO_BSP][3rd MIC] gooyeon.jung@lge.com 2012-10-16 gooyeon.jung@lge.com 2012-10-16 set capless mode on MIC_IN_5 & 6. [END]
 #define TABLA_A_TX_5_6_TEST_EN			(0x0168)
 #define TABLA_A_TX_5_6_TEST_EN__POR			(0x000000CC)
 #define TABLA_A_TX_5_6_ADC_CH5			(0x0169)

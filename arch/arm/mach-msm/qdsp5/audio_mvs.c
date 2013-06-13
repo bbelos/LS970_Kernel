@@ -20,8 +20,11 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/wakelock.h>
+#include <linux/pm_qos.h>
+
 #include <mach/debug_mm.h>
 #include <mach/msm_rpcrouter.h>
+#include <mach/cpuidle.h>
 
 #define MVS_PROG 0x30000014
 #define MVS_VERS 0x00030001
@@ -330,7 +333,7 @@ struct audio_mvs_info_type {
 	struct mutex out_lock;
 
 	struct wake_lock suspend_lock;
-	struct wake_lock idle_lock;
+	struct pm_qos_request pm_qos_req;
 };
 
 static struct audio_mvs_info_type audio_mvs_info;
@@ -422,6 +425,8 @@ static int audio_mvs_setup_mode(struct audio_mvs_info_type *audio)
 		set_voc_mode_msg.min_rate = cpu_to_be32(audio->rate_type);
 		set_voc_mode_msg.max_rate = cpu_to_be32(audio->rate_type);
 
+		MM_DBG("audio->mvs_mode %d audio->rate_type %d\n",
+			audio->mvs_mode, audio->rate_type);
 		msm_rpc_setup_req(&set_voc_mode_msg.rpc_hdr,
 				  audio->rpc_prog,
 				  audio->rpc_ver,
@@ -691,7 +696,8 @@ static int audio_mvs_start(struct audio_mvs_info_type *audio)
 
 	/* Prevent sleep. */
 	wake_lock(&audio->suspend_lock);
-	wake_lock(&audio->idle_lock);
+	pm_qos_update_request(&audio->pm_qos_req,
+			      msm_cpuidle_get_deep_idle_latency());
 
 	/* Acquire MVS. */
 	memset(&acquire_msg, 0, sizeof(acquire_msg));
@@ -778,8 +784,8 @@ static int audio_mvs_stop(struct audio_mvs_info_type *audio)
 	}
 
 	/* Allow sleep. */
+	pm_qos_update_request(&audio->pm_qos_req, PM_QOS_DEFAULT_VALUE);
 	wake_unlock(&audio->suspend_lock);
-	wake_unlock(&audio->idle_lock);
 
 	return rc;
 }
@@ -919,10 +925,14 @@ static void audio_mvs_process_rpc_request(uint32_t procedure,
 
 				MM_DBG("UL AMR frame_type %d\n",
 					 be32_to_cpu(*args));
-			} else if ((frame_mode == MVS_FRAME_MODE_PCM_UL) ||
-				   (frame_mode == MVS_FRAME_MODE_VOC_TX)) {
-				/* PCM and EVRC don't have frame_type */
+			} else if (frame_mode == MVS_FRAME_MODE_PCM_UL) {
+				/* PCM doesn't have frame_type */
 				buf_node->frame.frame_type = 0;
+			} else if (frame_mode == MVS_FRAME_MODE_VOC_TX) {
+				/* Extracting EVRC current buffer frame rate*/
+				buf_node->frame.frame_type = be32_to_cpu(*args);
+				pr_debug("%s: UL EVRC frame_type %d\n",
+					__func__, be32_to_cpu(*args));
 			} else if (frame_mode == MVS_FRAME_MODE_G711_UL) {
 				/* Extract G711 frame type. */
 				buf_node->frame.frame_type = be32_to_cpu(*args);
@@ -1052,7 +1062,7 @@ static void audio_mvs_process_rpc_request(uint32_t procedure,
 					cpu_to_be32(AUDIO_MVS_PKT_NORMAL);
 			} else if (frame_mode == MVS_FRAME_MODE_VOC_RX) {
 				dl_reply.cdc_param.gnr_arg.param1 =
-						cpu_to_be32(audio->rate_type);
+					cpu_to_be32(buf_node->frame.frame_type);
 				dl_reply.cdc_param.gnr_arg.param2 = 0;
 				dl_reply.cdc_param.\
 						gnr_arg.valid_pkt_status_ptr =
@@ -1484,7 +1494,8 @@ static long audio_mvs_ioctl(struct file *file,
 	case AUDIO_GET_MVS_CONFIG: {
 		struct msm_audio_mvs_config config;
 
-		MM_DBG("IOCTL GET_MVS_CONFIG\n");
+		MM_DBG("GET_MVS_CONFIG mvs_mode %d rate_type %d\n",
+			config.mvs_mode, config.rate_type);
 
 		mutex_lock(&audio->lock);
 		config.mvs_mode = audio->mvs_mode;
@@ -1599,9 +1610,8 @@ static int audio_mvs_open(struct inode *inode, struct file *file)
 	wake_lock_init(&audio_mvs_info.suspend_lock,
 		       WAKE_LOCK_SUSPEND,
 		       "audio_mvs_suspend");
-	wake_lock_init(&audio_mvs_info.idle_lock,
-		       WAKE_LOCK_IDLE,
-		       "audio_mvs_idle");
+	pm_qos_add_request(&audio_mvs_info.pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
+				PM_QOS_DEFAULT_VALUE);
 
 	audio_mvs_info.rpc_endpt = msm_rpc_connect_compatible(MVS_PROG,
 					MVS_VERS_COMP_VER2,

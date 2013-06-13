@@ -35,9 +35,8 @@
 #include "msm_watchdog.h"
 #include "timer.h"
 
-#ifdef CONFIG_LGE_HIDDEN_RESET
 #include <mach/board_lge.h>
-#endif
+
 #ifdef CONFIG_LGE_PM
 #include <linux/mfd/pm8xxx/pm8921-charger.h>
 #endif
@@ -53,6 +52,12 @@
 #define DLOAD_MODE_ADDR     0x0
 
 #define SCM_IO_DISABLE_PMIC_ARBITER	1
+
+#ifdef CONFIG_MSM_RESTART_V2
+#define use_restart_v2()        1
+#else
+#define use_restart_v2()        0
+#endif
 
 #ifdef CONFIG_LGE_HANDLE_PANIC
 /*
@@ -96,19 +101,9 @@ static struct notifier_block panic_blk = {
 static void set_dload_mode(int on)
 {
 	if (dload_mode_addr) {
-#ifdef CONFIG_LGE_HIDDEN_RESET
-		/* If dload magic is set, rpm booting is skipped by bootloader
-		 * Thus, skip dload magic during hreset_enable
-		 */
-		if (on && /* hreset_enable && */ restart_mode != RESTART_DLOAD)
-			goto skip_dload_magic;
-#endif
 		__raw_writel(on ? 0xE47B337D : 0, dload_mode_addr);
 		__raw_writel(on ? 0xCE14091A : 0,
 		       dload_mode_addr + sizeof(unsigned int));
-#ifdef CONFIG_LGE_HIDDEN_RESET
-skip_dload_magic:
-#endif
 #ifdef CONFIG_LGE_HANDLE_PANIC
 		__raw_writel(on ? LGE_ERROR_HANDLE_MAGIC_NUM : 0, lge_error_handle_cookie_addr);
 #endif
@@ -160,7 +155,11 @@ static void __msm_power_off(int lower_pshold)
 	pm8xxx_reset_pwr_off(0);
 
 	if (lower_pshold) {
-		__raw_writel(0, PSHOLD_CTL_SU);
+		if (!use_restart_v2())
+			__raw_writel(0, PSHOLD_CTL_SU);
+		else
+			__raw_writel(0, MSM_MPM2_PSHOLD_BASE);
+
 		mdelay(10000);
 		printk(KERN_ERR "Powering off has failed\n");
 	}
@@ -225,15 +224,19 @@ int lge_get_magic_for_subsystem(void)
 
 void lge_set_magic_for_subsystem(const char* subsys_name)
 {
-	const char *crash_subsys[] = {"modem", "riva", "dsps",
+	const char *crash_subsys[] = {"modem", "wcnss", "dsps",
 					"lpass", "external_modem", "gss",};
 	int i;
 
 	subsys_crash_magic = (0x6d630000 | 0x0000f000);
 
-	for (i=0; i < ARRAY_SIZE(crash_subsys); i++) {
+	for (i = 0; i < ARRAY_SIZE(crash_subsys); i++) {
 		if (!strncmp(crash_subsys[i], subsys_name, SUBSYS_NAME_MAX_LENGTH)) {
-			subsys_crash_magic = (0x6d630000 | ((i+1)<<12));
+			subsys_crash_magic = (0x6d630000 | ((i + 1) << 12));
+			break;
+		} else if (!strncmp("clear", subsys_name, SUBSYS_NAME_MAX_LENGTH)) {
+			printk(KERN_NOTICE "set subsys_crash_magic to 0\n");
+			subsys_crash_magic = 0;
 			break;
 		}
 	}
@@ -247,10 +250,8 @@ void lge_set_kernel_crash_magic(void)
 		__raw_writel(subsys_crash_magic, restart_reason);
 }
 #endif // CONFIG_LGE_HANDLE_PANIC
-
-void arch_reset(char mode, const char *cmd)
+static void msm_restart_prepare(const char *cmd)
 {
-
 #ifdef CONFIG_MSM_DLOAD_MODE
 
 	/* This looks like a normal reboot at this point. */
@@ -265,7 +266,7 @@ void arch_reset(char mode, const char *cmd)
 #ifdef CONFIG_LGE_HANDLE_PANIC
 		//replace to lge_set_kernel_crash_magic()
 		writel(0x6d63c421, restart_reason);
-		goto reset;
+		return;
 #endif
 	}
 
@@ -273,8 +274,6 @@ void arch_reset(char mode, const char *cmd)
 	if (!download_mode)
 		set_dload_mode(0);
 #endif
-
-	printk(KERN_NOTICE "Going down for restart now\n");
 
 #ifndef QCT_CLK_KICK_START
 	if (in_panic == 1) {
@@ -297,8 +296,8 @@ void arch_reset(char mode, const char *cmd)
 			  PC Sync - B&R : Add restart reason
 			  2012-05-21 woo.jung@lge.com
 			*/
-	        } else if (!strncmp(cmd, "--bnr_recovery", 14)) {
-	            __raw_writel(0x77665555, restart_reason);
+	      	 	} else if (!strncmp(cmd, "--bnr_recovery", 14)) {
+	           		__raw_writel(0x77665555, restart_reason);
 				printk("--bnr_recovery\n");
 			} else if (!strncmp(cmd, "oem-", 4)) {
 				unsigned long code;
@@ -320,7 +319,6 @@ void arch_reset(char mode, const char *cmd)
 			}
 		}
 	}
-reset:
 #else
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
@@ -347,19 +345,32 @@ reset:
 		mdelay(7000);
 	}
 #endif
+}
 
-	__raw_writel(0, msm_tmr0_base + WDT0_EN);
-	if (!(machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa())) {
-		mb();
-		__raw_writel(0, PSHOLD_CTL_SU); /* Actually reset the chip */
-		mdelay(5000);
-		pr_notice("PS_HOLD didn't work, falling back to watchdog\n");
-	}
+void msm_restart(char mode, const char *cmd)
+{
+	printk(KERN_NOTICE "Going down for restart now\n");
 
-	__raw_writel(1, msm_tmr0_base + WDT0_RST);
-	__raw_writel(5*0x31F3, msm_tmr0_base + WDT0_BARK_TIME);
-	__raw_writel(0x31F3, msm_tmr0_base + WDT0_BITE_TIME);
-	__raw_writel(1, msm_tmr0_base + WDT0_EN);
+	msm_restart_prepare(cmd);
+
+	if (!use_restart_v2()) {
+		__raw_writel(0, msm_tmr0_base + WDT0_EN);
+#ifndef CONFIG_LGE_BITE_RESET
+		if (!(machine_is_msm8x60_fusion() ||
+		      machine_is_msm8x60_fusn_ffa())) {
+			mb();
+			 /* Actually reset the chip */
+			__raw_writel(0, PSHOLD_CTL_SU);
+			mdelay(5000);
+			pr_notice("PS_HOLD didn't work, falling back to watchdog\n");
+		}
+#endif
+		__raw_writel(1, msm_tmr0_base + WDT0_RST);
+		__raw_writel(5*0x31F3, msm_tmr0_base + WDT0_BARK_TIME);
+		__raw_writel(0x31F3, msm_tmr0_base + WDT0_BITE_TIME);
+		__raw_writel(1, msm_tmr0_base + WDT0_EN);
+	} else
+		__raw_writel(0, MSM_MPM2_PSHOLD_BASE);
 
 	mdelay(10000);
 	printk(KERN_ERR "Restarting has failed\n");
@@ -368,7 +379,6 @@ reset:
 static int __init msm_pmic_restart_init(void)
 {
 	int rc;
-
 #ifdef CONFIG_LGE_HANDLE_PANIC
 //	lge_error_handle_cookie_addr = MSM_IMEM_BASE + LGE_ERROR_HANDLE_MAGIC_ADDR;
 #endif
@@ -398,7 +408,7 @@ static int __init msm_restart_init(void)
 	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
 	dload_mode_addr = MSM_IMEM_BASE + DLOAD_MODE_ADDR;
 #ifdef CONFIG_LGE_HANDLE_PANIC
-	lge_error_handle_cookie_addr = MSM_IMEM_BASE + LGE_ERROR_HANDLE_MAGIC_ADDR;
+        lge_error_handle_cookie_addr = MSM_IMEM_BASE + LGE_ERROR_HANDLE_MAGIC_ADDR;
 #endif
 	set_dload_mode(download_mode);
 #endif

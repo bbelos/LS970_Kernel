@@ -15,11 +15,11 @@
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
+#include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <mach/msm_bus_board.h>
 #include <mach/msm_memtypes.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/gpiomux.h>
 #include <mach/socinfo.h>
 #include <linux/ion.h>
@@ -59,7 +59,15 @@
 #define MIPI_VIDEO_SIMULATOR_VGA_PANEL_NAME	"mipi_video_simulator_vga"
 #define MIPI_CMD_RENESAS_FWVGA_PANEL_NAME	"mipi_cmd_renesas_fwvga"
 #define HDMI_PANEL_NAME	"hdmi_msm"
+#define MHL_PANEL_NAME "hdmi_msm,mhl_8334"
 #define TVOUT_PANEL_NAME	"tvout_msm"
+
+static unsigned char mhl_display_enabled;
+
+unsigned char msm8930_mhl_display_enabled(void)
+{
+	return mhl_display_enabled;
+}
 
 static struct resource msm_fb_resources[] = {
 	{
@@ -135,6 +143,8 @@ static bool dsi_power_on;
 static int mipi_dsi_cdp_panel_power(int on)
 {
 	static struct regulator *reg_l8, *reg_l23, *reg_l2;
+	/* Control backlight GPIO (24) directly when using PM8917 */
+	int gpio24 = PM8917_GPIO_PM_TO_SYS(24);
 	int rc;
 
 	pr_debug("%s: state : %d\n", __func__, on);
@@ -190,13 +200,21 @@ static int mipi_dsi_cdp_panel_power(int on)
 				 rc);
 			gpio_free(DISP_3D_2D_MODE);
 			return -ENODEV;
-			}
+		}
 		rc = gpio_direction_output(DISP_3D_2D_MODE, 0);
 		if (rc) {
 			pr_err("gpio_direction_output failed for %d gpio rc=%d\n",
 			DISP_3D_2D_MODE, rc);
 			return -ENODEV;
+		}
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917) {
+			rc = gpio_request(gpio24, "disp_bl");
+			if (rc) {
+				pr_err("request for gpio 24 failed, rc=%d\n",
+					rc);
+				return -ENODEV;
 			}
+		}
 		dsi_power_on = true;
 	}
 	if (on) {
@@ -238,6 +256,8 @@ static int mipi_dsi_cdp_panel_power(int on)
 		gpio_set_value(DISP_RST_GPIO, 1);
 		gpio_set_value(DISP_3D_2D_MODE, 1);
 		usleep(20);
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio24, 1);
 	} else {
 
 		gpio_set_value(DISP_RST_GPIO, 0);
@@ -274,6 +294,8 @@ static int mipi_dsi_cdp_panel_power(int on)
 		}
 		gpio_set_value(DISP_3D_2D_MODE, 0);
 		usleep(20);
+		if (socinfo_get_pmic_model() == PMIC_MODEL_PM8917)
+			gpio_set_value_cansleep(gpio24, 0);
 	}
 	return 0;
 }
@@ -413,35 +435,13 @@ static struct msm_bus_scale_pdata mdp_bus_scale_pdata = {
 
 #endif
 
-#ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
-static int mdp_core_clk_rate_table[] = {
-	200000000,
-	200000000,
-	200000000,
-	200000000,
-};
-#else
-static int mdp_core_clk_rate_table[] = {
-	85330000,
-	128000000,
-	160000000,
-	200000000,
-};
-#endif
-
 static struct msm_panel_common_pdata mdp_pdata = {
 	.gpio = MDP_VSYNC_GPIO,
-#ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
-	.mdp_core_clk_rate = 200000000,
-#else
-	.mdp_core_clk_rate = 85330000,
-#endif
-	.mdp_core_clk_table = mdp_core_clk_rate_table,
-	.num_mdp_clk = ARRAY_SIZE(mdp_core_clk_rate_table),
+	.mdp_max_clk = 200000000,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.mdp_bus_scale_table = &mdp_bus_scale_pdata,
 #endif
-	.mdp_rev = MDP_REV_42,
+	.mdp_rev = MDP_REV_43,
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
 	.mem_hid = BIT(ION_CP_MM_HEAP_ID),
 #else
@@ -840,4 +840,29 @@ void __init msm8930_allocate_fb_region(void)
 	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
 	pr_info("allocating %lu bytes at %p (%lx physical) for fb\n",
 			size, addr, __pa(addr));
+}
+
+void __init msm8930_set_display_params(char *prim_panel, char *ext_panel)
+{
+	if (strnlen(prim_panel, PANEL_NAME_MAX_LEN)) {
+		strlcpy(msm_fb_pdata.prim_panel_name, prim_panel,
+			PANEL_NAME_MAX_LEN);
+		pr_debug("msm_fb_pdata.prim_panel_name %s\n",
+			msm_fb_pdata.prim_panel_name);
+	}
+	if (strnlen(ext_panel, PANEL_NAME_MAX_LEN)) {
+		strlcpy(msm_fb_pdata.ext_panel_name, ext_panel,
+			PANEL_NAME_MAX_LEN);
+		pr_debug("msm_fb_pdata.ext_panel_name %s\n",
+			msm_fb_pdata.ext_panel_name);
+
+		if (!strncmp((char *)msm_fb_pdata.ext_panel_name,
+			MHL_PANEL_NAME, strnlen(MHL_PANEL_NAME,
+				PANEL_NAME_MAX_LEN))) {
+			pr_debug("MHL is external display by boot parameter\n");
+			mhl_display_enabled = 1;
+		}
+	}
+
+	hdmi_msm_data.is_mhl_enabled = mhl_display_enabled;
 }

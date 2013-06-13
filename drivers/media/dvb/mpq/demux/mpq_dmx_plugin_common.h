@@ -13,7 +13,7 @@
 #ifndef _MPQ_DMX_PLUGIN_COMMON_H
 #define _MPQ_DMX_PLUGIN_COMMON_H
 
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 
 #include "dvbdev.h"
 #include "dmxdev.h"
@@ -424,6 +424,18 @@ int mpq_dmx_decoder_fullness_wait(
  */
 int mpq_dmx_decoder_fullness_abort(
 		struct dvb_demux_feed *feed);
+
+/**
+ * mpq_dmx_decoder_buffer_status - Returns the
+ * status of the decoder's buffer.
+ *
+ * @feed: The decoder's feed
+ * @dmx_buffer_status: Status of decoder's buffer
+ *
+ * Return     error code.
+ */
+int mpq_dmx_decoder_buffer_status(struct dvb_demux_feed *feed,
+		struct dmx_buffer_status *dmx_buffer_status);
 
 /**
  * mpq_dmx_process_video_packet - Assemble PES data and output it

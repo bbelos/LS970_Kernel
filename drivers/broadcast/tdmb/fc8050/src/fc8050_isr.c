@@ -14,7 +14,7 @@
 #include "../inc/fc8050_regs.h"
 
 #ifdef USE_QCT_DMA_LGE
-#include <linux/miscdevice.h>
+#include <linux/dma-mapping.h>
 static fci_u8 ficBuffer[512+4] __cacheline_aligned;
 static fci_u8 mscBuffer[8192+4] __cacheline_aligned;
 #else
@@ -70,10 +70,10 @@ void fc8050_isr(HANDLE hDevice)
 			bbm_word_read(hDevice, BBM_BUF_FIC_THR, &size);
 
 			//wonhee.jeong test 
-			if(size > 516)
-			{
-				printk("FIC Data size is bigger than 516.\n");
-			}
+			//if(size > 516)
+			//{
+				//printk("FIC Data size is bigger than 516.\n");
+			//}
 			//
 			
 			size += 1;
@@ -92,10 +92,10 @@ void fc8050_isr(HANDLE hDevice)
 				bbm_word_read(hDevice, BBM_BUF_CH0_THR+i*2, &size);
 
 				//wonhee.jeong test 
-				if(size > 8196)
-				{
-					printk("MSC Data size is bigger than 8196.\n");
-				}
+				//if(size > 8196)
+				//{
+					//printk("MSC Data size is bigger than 8196.\n");
+				//}
 				//
 				
 				size += 1;

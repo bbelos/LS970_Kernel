@@ -9,6 +9,7 @@
 
 #include "snfc_rfs.h"
 #include "snfc_gpio.h"
+#include <mach/board_lge.h>
 
 /*
 *	Defines
@@ -42,21 +43,15 @@ static int snfc_rfs_open (struct inode *inode, struct file *fp)
 
 	if(isopen_snfcrfs == 1)
 	{
-		#ifdef FEATURE_DEBUG_LOW 
-		SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_open - already open \n");
-		#endif
+		SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_open - already open \n");
 		return 0;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_open - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_open - start \n");
 
-	//rc = snfc_gpio_open(GPIO_SNFC_RFS, GPIO_DIRECTION_IN, GPIO_LOW_VALUE);
+	//rc = snfc_gpio_open(gpio_rfs, GPIO_DIRECTION_IN, GPIO_LOW_VALUE);
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_open - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_open - end \n");
 	isopen_snfcrfs = 1;
 
 	return rc;
@@ -74,9 +69,7 @@ static ssize_t snfc_rfs_read(struct file *pf, char *pbuf, size_t size, loff_t *p
 	int getvalue = GPIO_LOW_VALUE;
 	int rfonoff;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_read - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_read - start \n");
 
 	/* Check Parameters */
 	if(pf == NULL || pbuf == NULL /*|| size == NULL*/ /*||pos == NULL*/)
@@ -86,7 +79,7 @@ static ssize_t snfc_rfs_read(struct file *pf, char *pbuf, size_t size, loff_t *p
 	}
 
 	/* Get GPIO value */
-	getvalue = snfc_gpio_read(GPIO_SNFC_RFS);
+	getvalue = snfc_gpio_read(gpio_rfs);	
 
 	if((getvalue != GPIO_LOW_VALUE)&&(getvalue != GPIO_HIGH_VALUE))
 	{
@@ -96,14 +89,14 @@ static ssize_t snfc_rfs_read(struct file *pf, char *pbuf, size_t size, loff_t *p
 
 	/* Copy value to user memory */
 	//getvalue = getvalue ? GPIO_LOW_VALUE: GPIO_HIGH_VALUE;
-	SNFC_DEBUG_MSG("[snfc_rfs] RFS pin status : %d \n", getvalue);
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] RFS pin status : %d \n", getvalue);
 
 	if(getvalue)
 		rfonoff = 0;
 	else
 		rfonoff = 1;
 	
-	SNFC_DEBUG_MSG("[snfc_rfs] rf status : %d \n", rfonoff);
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] rf status : %d \n", rfonoff);
 
 	rc = copy_to_user((void*)pbuf, (void*)&rfonoff, size);
 	if(rc)
@@ -112,9 +105,7 @@ static ssize_t snfc_rfs_read(struct file *pf, char *pbuf, size_t size, loff_t *p
 		return rc;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_read - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_read - end \n");
 
 	return size;
 }
@@ -134,14 +125,10 @@ static int snfc_rfs_release (struct inode *inode, struct file *fp)
 		return -1;
 	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_release - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_release - start \n");
 	isopen_snfcrfs = 0;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_release - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_release - end \n");
 
 	return 0;
 }
@@ -164,9 +151,7 @@ static int snfc_rfs_init(void)
 {
 	int rc;
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_init - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_init - start \n");
 
 	/* register the device file */
 	rc = misc_register(&snfc_rfs_device);
@@ -175,26 +160,30 @@ static int snfc_rfs_init(void)
 		SNFC_DEBUG_MSG("[snfc_rfs] FAIL!! can not register snfc_rfs \n");
 		return rc;
 	}
+#ifndef CONFIG_CXD2235AGG_GJ_KDDI	
+	if(lge_get_board_revno() >= HW_REV_C)
+	{
+		gpio_rfs = 84;
+	}
+	else
+#endif
+	{
+		gpio_rfs = 55;
+	}
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_init - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_init - end \n");
 
 	return 0;
 }
 
 static void snfc_rfs_exit(void)
 {
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_exit - start \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_exit - start \n");
 
 	/* deregister the device file */
 	misc_deregister(&snfc_rfs_device);
 
-	#ifdef FEATURE_DEBUG_LOW 
-	SNFC_DEBUG_MSG("[snfc_rfs] snfc_rfs_exit - end \n");
-	#endif
+	SNFC_DEBUG_MSG_LOW("[snfc_rfs] snfc_rfs_exit - end \n");
 }
 
 module_init(snfc_rfs_init);

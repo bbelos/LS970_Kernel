@@ -39,6 +39,9 @@ u32 dsi_irq;
 u32 esc_byte_ratio;
 
 static boolean tlmm_settings = FALSE;
+//jhmoon_start
+static struct msm_panel_info *local_pinfo;
+//jhmoon_end
 
 static int mipi_dsi_probe(struct platform_device *pdev);
 static int mipi_dsi_remove(struct platform_device *pdev);
@@ -69,46 +72,36 @@ static int mipi_dsi_off(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd;
 	struct msm_panel_info *pinfo;
 
+	pr_debug("%s+:\n", __func__);
+
 	mfd = platform_get_drvdata(pdev);
 	pinfo = &mfd->panel_info;
+
+	printk(KERN_INFO"%s is started.. \n", __func__);
 
 	if (mdp_rev >= MDP_REV_41)
 		mutex_lock(&mfd->dma->ov_mutex);
 	else
 		down(&mfd->dma->mutex);
 
-	mdp4_overlay_dsi_state_set(ST_DSI_SUSPEND);
-
-	/*
-	 * Description: dsi clock is need to perform shutdown.
-	 * mdp4_dsi_cmd_dma_busy_wait() will enable dsi clock if disabled.
-	 * also, wait until dma (overlay and dmap) finish.
-	 */
 	if (mfd->panel_info.type == MIPI_CMD_PANEL) {
-		if (mdp_rev >= MDP_REV_41) {
-			mdp4_dsi_cmd_dma_busy_wait(mfd);
-			mdp4_dsi_blt_dmap_busy_wait(mfd);
-			mipi_dsi_mdp_busy_wait(mfd);
-		} else {
-			mdp3_dsi_cmd_dma_busy_wait(mfd);
-		}
-	} else {
-		/* video mode, wait until fifo cleaned */
-		mipi_dsi_controller_cfg(0);
+		mipi_dsi_prepare_clocks();
+		mipi_dsi_ahb_ctrl(1);
+		mipi_dsi_clk_enable();
+
+		/* make sure dsi_cmd_mdp is idle */
+		mipi_dsi_cmd_mdp_busy();
 	}
 
 	/*
 	 * Desctiption: change to DSI_CMD_MODE since it needed to
 	 * tx DCS dsiplay off comamnd to panel
 	 */
-#if defined(CONFIG_MACH_LGE)
-/* LGE_CHANGE
-* for power sequence of lgit panel.
-* 2012-05-28 jungbeom.shim@lge.com
-*/
-	#if defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT)
-		mipi_dsi_op_mode_config(DSI_CMD_MODE);
-	#endif
+
+#if defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WXGA_PT) \
+	|| defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT) \
+       || defined(CONFIG_FB_MSM_MIPI_DSI_LGIT_FHD)
+	//for power sequence of lgit panel
 #else
 	mipi_dsi_op_mode_config(DSI_CMD_MODE);
 #endif
@@ -123,14 +116,10 @@ static int mipi_dsi_off(struct platform_device *pdev)
 		}
 	}
 
-#if defined(CONFIG_MACH_LGE)
-/* LGE_CHANGE
-* for power sequence of lgit panel.
-* 2012-05-28 jungbeom.shim@lge.com
-*/
-	#if defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT)
-	ret = panel_next_off(pdev);
-	#endif
+#if defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WXGA_PT) \
+	|| defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT) \
+       || defined(CONFIG_FB_MSM_MIPI_DSI_LGIT_FHD)
+	//for power sequence of lgit panel.
 #else
 	ret = panel_next_off(pdev);
 #endif
@@ -139,19 +128,14 @@ static int mipi_dsi_off(struct platform_device *pdev)
 	mdp_bus_scale_update_request(0);
 #endif
 
-	local_bh_disable();
 	mipi_dsi_clk_disable();
-	local_bh_enable();
 
 	/* disbale dsi engine */
 	MIPI_OUTP(MIPI_DSI_BASE + 0x0000, 0);
 
 	mipi_dsi_phy_ctrl(0);
 
-
-	local_bh_disable();
 	mipi_dsi_ahb_ctrl(0);
-	local_bh_enable();
 
 	mipi_dsi_unprepare_clocks();
 	if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
@@ -162,8 +146,9 @@ static int mipi_dsi_off(struct platform_device *pdev)
 	else
 		up(&mfd->dma->mutex);
 
-	pr_debug("%s-:\n", __func__);
+	pr_debug("End of %s ....:\n", __func__);
 
+	printk(KERN_INFO"%s is ended.. \n", __func__);
 	return ret;
 }
 
@@ -181,11 +166,14 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	u32 dummy_xres, dummy_yres;
 	int target_type = 0;
 
+	pr_debug("%s+:\n", __func__);
+
 	mfd = platform_get_drvdata(pdev);
 	fbi = mfd->fbi;
 	var = &fbi->var;
 	pinfo = &mfd->panel_info;
 	esc_byte_ratio = pinfo->mipi.esc_byte_ratio;
+	printk(KERN_INFO"%s is started.. \n", __func__);
 
 	if (mipi_dsi_pdata && mipi_dsi_pdata->dsi_power_save)
 		mipi_dsi_pdata->dsi_power_save(1);
@@ -193,9 +181,7 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	cont_splash_clk_ctrl(0);
 	mipi_dsi_prepare_clocks();
 
-	local_bh_disable();
 	mipi_dsi_ahb_ctrl(1);
-	local_bh_enable();
 
 	clk_rate = mfd->fbi->var.pixclock;
 	clk_rate = min(clk_rate, mfd->panel_info.clk_max);
@@ -207,9 +193,7 @@ static int mipi_dsi_on(struct platform_device *pdev)
 
 	mipi_dsi_phy_init(0, &(mfd->panel_info), target_type);
 
-	local_bh_disable();
 	mipi_dsi_clk_enable();
-	local_bh_enable();
 
 	MIPI_OUTP(MIPI_DSI_BASE + 0x114, 1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x114, 0);
@@ -294,14 +278,14 @@ static int mipi_dsi_on(struct platform_device *pdev)
 		mutex_lock(&mfd->dma->ov_mutex);
 	else
 		down(&mfd->dma->mutex);
-
 #if defined(CONFIG_MACH_LGE)
 /* LGE_CHANGE
-* for power sequence of lgit panel
-* 2012-05-28 jungbeom.shim@lge.com
-*/
+ * in case of WXGA panel,
+ * video mode MUST NOT be set prior to power_on_cmd seq.
+ * 2012-09-01 chaeuk.lee@lge.com
+ */
 	ret = panel_next_on(pdev);
-	if (ret < 0) 
+	if (ret < 0)
 	{
 		if (mdp_rev >= MDP_REV_41)
 			mutex_unlock(&mfd->dma->ov_mutex);
@@ -312,8 +296,8 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	} else {
 		ret = 0;
 	}
-	#if defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT)
-		mipi_dsi_op_mode_config(mipi->mode);
+	#if defined(CONFIG_FB_MSM_MIPI_HITACHI_VIDEO_HD_PT) || defined(CONFIG_FB_MSM_MIPI_DSI_LGIT_FHD)
+	mipi_dsi_op_mode_config(mipi->mode);
 	#endif
 #else
 	ret = panel_next_on(pdev);
@@ -366,26 +350,281 @@ static int mipi_dsi_on(struct platform_device *pdev)
 			}
 			mipi_dsi_set_tear_on(mfd);
 		}
+		mipi_dsi_clk_disable();
+		mipi_dsi_ahb_ctrl(0);
+		mipi_dsi_unprepare_clocks();
 	}
 
 #ifdef CONFIG_MSM_BUS_SCALING
 	mdp_bus_scale_update_request(2);
 #endif
 
-	mdp4_overlay_dsi_state_set(ST_DSI_RESUME);
-
 	if (mdp_rev >= MDP_REV_41)
 		mutex_unlock(&mfd->dma->ov_mutex);
 	else
 		up(&mfd->dma->mutex);
 
-	pr_debug("%s-:\n", __func__);
+        pr_debug("End of %s....:\n", __func__);
+	printk(KERN_INFO"%s is ended.. \n", __func__);
 
 	return ret;
 }
 
 
 static int mipi_dsi_resource_initialized;
+static int mipi_dsi_regulator_show(struct device * dev, struct device_attribute * attr, char * buf)
+{   
+    int r;
+    struct mipi_dsi_phy_ctrl *pd;
+
+    pd = (local_pinfo->mipi).dsi_phy_db;
+
+    r=snprintf(buf, PAGE_SIZE, "regulator: %x %x %x %x %x\n", pd->regulator[0], pd->regulator[1],
+        pd->regulator[2],pd->regulator[3],pd->regulator[4]);
+   
+    return r;
+}
+
+static int mipi_dsi_regulator_store(struct device * dev, struct device_attribute * attr, const char * buf, size_t count)
+{
+   char *bp;
+   char **token;
+   char *data = NULL;
+   struct mipi_dsi_phy_ctrl *pd;
+   int i=0;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+   
+   bp=(char *)buf;
+
+   while(true){
+        if(strstr(bp, ", ")){
+            bp=strstr(bp, "0x");
+            token=&bp;
+            data=strsep(token,", ");
+            if(data == NULL)
+                return -1;
+            pd->regulator[i]=simple_strtol(data,NULL,16);            
+            token=NULL;
+        }else{
+            bp=strstr(bp, "0x");
+            if(bp == NULL)
+                return -1;
+            pd->regulator[i]=simple_strtol(bp,NULL,16);            
+            break;
+        } 
+        i++;
+   } 
+    return count;
+}
+DEVICE_ATTR(mipi_dsi_regulator, 0774, mipi_dsi_regulator_show, mipi_dsi_regulator_store);
+static int mipi_dsi_strength_show(struct device * dev, struct device_attribute * attr, char * buf)
+{ 
+    int r;
+    struct mipi_dsi_phy_ctrl *pd;
+
+    pd = (local_pinfo->mipi).dsi_phy_db;
+
+    r=snprintf(buf, PAGE_SIZE, "strength: %x %x %x %x\n", pd->strength[0], pd->strength[1],
+        pd->strength[2],pd->strength[3]);
+   
+    return r;
+}
+
+static int mipi_dsi_strength_store(struct device * dev, struct device_attribute * attr, const char * buf, size_t count)
+{
+   char *bp;
+   char **token;
+   char *data = NULL;
+   struct mipi_dsi_phy_ctrl *pd;
+   int i=0;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+  
+   bp=(char *)buf;
+
+   while(true){
+        if(strstr(bp, ", ")){
+            bp=strstr(bp, "0x");
+            token=&bp;
+            data=strsep(token,", ");
+            if(data == NULL)
+                return -1;
+            pd->strength[i]=simple_strtol(data,NULL,16);            
+            token=NULL;
+       }else{
+            bp=strstr(bp, "0x");
+            if(bp == NULL)
+                return -1;
+            pd->strength[i]=simple_strtol(bp,NULL,16);            
+            break;
+        }
+        i++;
+    }
+    return count;
+}
+DEVICE_ATTR(mipi_dsi_strength, 0774, mipi_dsi_strength_show, mipi_dsi_strength_store);
+static int mipi_dsi_ctrl_show(struct device * dev, struct device_attribute * attr, char * buf)
+{   
+    int r;
+    struct mipi_dsi_phy_ctrl *pd;
+
+    pd = (local_pinfo->mipi).dsi_phy_db;
+
+    r=snprintf(buf, PAGE_SIZE, "ctrl: %x %x %x %x\n", pd->ctrl[0], pd->ctrl[1],
+        pd->ctrl[2],pd->ctrl[3]);
+   
+    return r;
+}
+
+static int mipi_dsi_ctrl_store(struct device * dev, struct device_attribute * attr, const char * buf, size_t count)
+{
+   char *bp;
+   char **token;
+   char *data = NULL;
+   struct mipi_dsi_phy_ctrl *pd;
+   int i=0;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+  
+   bp=(char *)buf;
+
+   while(true){
+        if(strstr(bp, ", ")){
+            bp=strstr(bp, "0x");
+            token=&bp;
+            data=strsep(token,", ");
+            if(data == NULL)
+                return -1;
+            pd->ctrl[i]=simple_strtol(data,NULL,16);            
+            token=NULL;
+        }else{
+            bp=strstr(bp, "0x");
+            if(bp == NULL)
+                return -1;
+            pd->ctrl[i]=simple_strtol(bp,NULL,16);            
+            break;
+        }
+        i++;
+    }
+    return count;
+}
+DEVICE_ATTR(mipi_dsi_ctrl, 0774, mipi_dsi_ctrl_show, mipi_dsi_ctrl_store);
+
+static int mipi_dsi_timing_show(struct device * dev, struct device_attribute * attr, char * buf)
+{  
+   int  i,r,total_len = 0;
+   char str[150];
+   char temp[5];
+   struct mipi_dsi_phy_ctrl *pd;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+
+   for(i=0; i<12; i++){
+       sprintf(temp,"%x ", pd->timing[i]);
+	   if(i == 0)
+		 strcpy(str, temp);
+	   else
+       	 strcat(str + total_len,temp);
+	   total_len+=strlen(temp);
+   }
+
+   r = snprintf(buf, PAGE_SIZE, "timing: %s\n", str);
+ 
+   return r;
+}
+
+static int mipi_dsi_timing_store(struct device * dev, struct device_attribute * attr, const char * buf, size_t count)
+{
+   char *bp;
+   char **token;
+   char *data = NULL;
+   struct mipi_dsi_phy_ctrl *pd;
+   int i=0;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+   
+   bp=(char *)buf;
+
+   while(true){
+        if(strstr(bp, ", ")){
+            bp=strstr(bp, "0x");
+            token=&bp;
+            data=strsep(token,", ");
+            if(data == NULL)
+                return -1;
+            pd->timing[i]=simple_strtol(data,NULL,16);            
+            token=NULL;
+        }else{
+            bp=strstr(bp, "0x");
+            if(bp == NULL)
+                return -1;
+            pd->timing[i]=simple_strtol(bp,NULL,16);            
+            break;
+        }       
+        i++;
+    }
+    return count;
+}
+DEVICE_ATTR(mipi_dsi_timing, 0774, mipi_dsi_timing_show, mipi_dsi_timing_store);
+
+static int mipi_dsi_pll_show(struct device * dev, struct device_attribute * attr, char * buf)
+{  
+   int  i,r,total_len = 0;
+   char str[150];
+   char temp[5];
+   struct mipi_dsi_phy_ctrl *pd;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+
+   for(i=0; i<21; i++){
+       sprintf(temp,"%x ", pd->pll[i]);
+	   if(i == 0)
+		 strcpy(str, temp);
+	   else
+             	 strcat(str + total_len,temp);
+	   total_len+=strlen(temp);
+   }
+
+   r = snprintf(buf, PAGE_SIZE, "pll: %s\n", str);
+ 
+   return r;
+}
+
+static int mipi_dsi_pll_store(struct device * dev, struct device_attribute * attr, const char * buf, size_t count)
+{
+   char *bp;
+   char **token;
+   char *data = NULL;
+   struct mipi_dsi_phy_ctrl *pd;
+   int i=0;
+
+   pd = (local_pinfo->mipi).dsi_phy_db;
+   
+   bp=(char *)buf;
+
+   while(true){
+        if(strstr(bp, ", ")){
+            bp=strstr(bp, "0x");
+            token=&bp;
+            data=strsep(token,", ");
+            if(data == NULL)
+                return -1;
+            pd->pll[i]=simple_strtol(data,NULL,16);            
+            token=NULL;
+        }else{
+            bp=strstr(bp, "0x");
+            if(bp == NULL)
+                return -1;
+            pd->pll[i]=simple_strtol(bp,NULL,16);            
+            break;
+        } 
+        i++;
+   } 
+    return count;
+}
+DEVICE_ATTR(mipi_dsi_pll, 0774, mipi_dsi_pll_show, mipi_dsi_pll_store);
+ 
 
 static int mipi_dsi_probe(struct platform_device *pdev)
 {
@@ -396,6 +635,7 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	struct platform_device *mdp_dev = NULL;
 	struct msm_fb_panel_data *pdata = NULL;
 	int rc;
+       int err;
 	uint8 lanes = 0, bpp;
 	uint32 h_period, v_period, dsi_pclk_rate;
 
@@ -503,9 +743,6 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (pdev_list_cnt >= MSM_FB_MAX_DEV_LIST)
 		return -ENOMEM;
 
-	if (!mfd->cont_splash_done)
-		cont_splash_clk_ctrl(1);
-
 	mdp_dev = platform_device_alloc("mdp", pdev->id);
 	if (!mdp_dev)
 		return -ENOMEM;
@@ -538,6 +775,10 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	 */
 	mfd->panel_info = pdata->panel_info;
 	pinfo = &mfd->panel_info;
+
+//jhmoon_start
+    local_pinfo = &mfd->panel_info;
+//jhmoon_end
 
 	if (mfd->panel_info.type == MIPI_VIDEO_PANEL)
 		mfd->dest = DISPLAY_LCDC;
@@ -621,8 +862,10 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (rc)
 		goto mipi_dsi_probe_err;
 
-	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 103300000))
+	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 223000000)) {
+		pr_err("%s: Pixel clock not supported\n", __func__);
 		dsi_pclk_rate = 35000000;
+	}
 	mipi->dsi_pclk_rate = dsi_pclk_rate;
 
 	/*
@@ -637,7 +880,27 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (rc)
 		goto mipi_dsi_probe_err;
 
+//jhmoon_start
+    err = device_create_file(&pdev->dev, &dev_attr_mipi_dsi_regulator);
+    if(err<0)
+        printk("[jhmoon] error device create file\n");
+    err = device_create_file(&pdev->dev, &dev_attr_mipi_dsi_strength);
+    if(err<0)
+        printk("[jhmoon] error device create file\n");
+    err = device_create_file(&pdev->dev, &dev_attr_mipi_dsi_timing);
+    if(err<0)
+        printk("[jhmoon] error device create file\n");
+    err = device_create_file(&pdev->dev, &dev_attr_mipi_dsi_ctrl);
+    if(err<0)
+        printk("[jhmoon] error device create file\n");
+    err = device_create_file(&pdev->dev, &dev_attr_mipi_dsi_pll);
+    if(err<0)
+        printk("[jhmoon] error device create file\n");
+//jhmoon_end
 	pdev_list[pdev_list_cnt++] = pdev;
+
+	if (!mfd->cont_splash_done)
+		cont_splash_clk_ctrl(1);
 
 return 0;
 

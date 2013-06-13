@@ -2,6 +2,7 @@
  *
  * Copyright (C) 2007 Google, Inc.
  * Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012, LGE Inc.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -27,45 +28,42 @@
 #endif
 
 typedef enum {
-    HW_REV_EVB1 = 0,
-    HW_REV_EVB2,
-    HW_REV_A,
-    HW_REV_B,
-    HW_REV_C,
-    HW_REV_D,
-    HW_REV_E,
-    HW_REV_F,
-    HW_REV_G,
-    HW_REV_H,
-    HW_REV_1_0,
-    HW_REV_1_1,
-    HW_REV_1_2,
-    HW_REV_MAX
+	HW_REV_EVB1 = 0,
+	HW_REV_EVB2,
+	HW_REV_A,
+	HW_REV_B,
+	HW_REV_C,
+	HW_REV_D,
+	HW_REV_E,
+	HW_REV_F,
+	HW_REV_G,
+	HW_REV_H,
+	HW_REV_1_0,
+	HW_REV_1_1,
+	HW_REV_1_2,
+	HW_REV_MAX
 } hw_rev_type;
 
 hw_rev_type lge_get_board_revno(void);
 
 #ifdef CONFIG_LGE_PM
-/* LGE_CHANGE
- * Classified the ADC value for cable detection
- * 2011-12-05, kidong0420.kim@lge.com
- */
+/*Classified the ADC value for cable detection */
 typedef enum {
-    NO_INIT_CABLE = 0,
-    CABLE_MHL_1K,
-    CABLE_U_28P7K,
-    CABLE_28P7K,
-    CABLE_56K,
-    CABLE_100K,
-    CABLE_130K,
-    CABLE_180K,
-    CABLE_200K,
-    CABLE_220K,
-    CABLE_270K,
-    CABLE_330K,
-    CABLE_620K,
-    CABLE_910K,
-    CABLE_NONE
+	NO_INIT_CABLE = 0,
+	CABLE_MHL_1K,
+	CABLE_U_28P7K,
+	CABLE_28P7K,
+	CABLE_56K,
+	CABLE_100K,
+	CABLE_130K,
+	CABLE_180K,
+	CABLE_200K,
+	CABLE_220K,
+	CABLE_270K,
+	CABLE_330K,
+	CABLE_620K,
+	CABLE_910K,
+	CABLE_NONE
 } acc_cable_type;
 
 struct chg_cable_info {
@@ -82,21 +80,29 @@ unsigned lge_pm_get_usb_current(void);
 #endif
 
 #ifdef CONFIG_LGE_PM_BATTERY_ID_CHECKER
+bool is_lge_battery(void);
 enum {
-	BATT_UNKNOWN,
-	BATT_DS2704_N = 17,
-	BATT_DS2704_L = 32,
-	BATT_ISL6296_N = 73,
-	BATT_ISL6296_L = 94,
+	BATT_ID_UNKNOWN,
+	BATT_ID_DS2704_N = 17,
+	BATT_ID_DS2704_L = 32,
+	BATT_ID_ISL6296_N = 73,
+	BATT_ID_ISL6296_L = 94,
+	BATT_ID_DS2704_C = 48,
+	BATT_ID_ISL6296_C =105,
 };
-extern int lge_battery_info;
+
+#else
+static inline bool is_lge_battery(void)
+{
+	return true;
+}
 #endif
 
 #ifdef CONFIG_LGE_KCAL
 struct kcal_platform_data {
-	int (*set_values)(int r, int g, int b);
-	int (*get_values)(int *r, int *g, int *b);
-	int (*refresh_display)(void);
+	int (*set_values) (int r, int g, int b);
+	int (*get_values) (int *r, int *g, int *b);
+	int (*refresh_display) (void);
 };
 #endif
 
@@ -118,7 +124,7 @@ struct pseudo_batt_info_type {
 #endif
 int __init lge_get_uart_mode(void);
 
-#if defined(CONFIG_LGE_NFC_PN544)
+#if defined(CONFIG_LGE_NFC)
 void __init lge_add_nfc_devices(void);
 #endif
 /* from androidboot.mode */
@@ -150,27 +156,11 @@ void __init lge_add_ramconsole_devices(void);
 #ifdef CONFIG_LGE_HANDLE_PANIC
 void __init lge_add_panic_handler_devices(void);
 int lge_get_magic_for_subsystem(void);
-void lge_set_magic_for_subsystem(const char* subsys_name);
+void lge_set_magic_for_subsystem(const char *subsys_name);
 #endif
 
 #ifdef CONFIG_LGE_QFPROM_INTERFACE
 void __init lge_add_qfprom_devices(void);
-#endif
-
-#if defined(CONFIG_LGE_HIDDEN_RESET)
-#if defined(CONFIG_MACH_APQ8064_J1D) || defined(CONFIG_MACH_APQ8064_J1KD)
-#define LCD_RESOLUTION_X        720
-#define LCD_RESOLUTION_Y        1280
-#else
-#define LCD_RESOLUTION_X        768
-#define LCD_RESOLUTION_Y        1280
-#endif
-
-extern int hreset_enable;
-extern int on_hidden_reset;
-
-int lge_get_fb_phys_info(unsigned long *start, unsigned long *size);
-void *lge_get_hreset_fb_phys_addr(void);
 #endif
 
 #ifdef CONFIG_LGE_PM_LOW_BATT_CHG

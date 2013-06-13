@@ -1,6 +1,6 @@
 /*
  *  felicai2c.h
- *  
+ *
  */
 
 #ifndef __FELICA_I2C_H__

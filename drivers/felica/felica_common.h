@@ -1,6 +1,6 @@
 /*
  *  felicacommon.h
- *  
+ *
  */
 
 #ifndef __FELICACOMMON_H__
@@ -28,6 +28,8 @@ extern "C" {
 #include <asm/io.h>/*static*/
 #include <mach/gpio.h>
 #include <mach/socinfo.h>
+#include <mach/board_lge.h>/*lge_get_board_revno*/
+
 /*
  *  DEFINE
  */
@@ -46,12 +48,22 @@ typedef enum _e_snfc_uart_status {
 	UART_STATUS_NONE,
 } _e_snfc_uart_status;
 
+typedef enum _e_snfc_i2c_status {
+             I2C_STATUS_NO_USE = 0,
+             I2C_STATUS_READY,
+             I2C_STATUS_FOR_FELICA,
+             I2C_STATUS_FOR_NFC,
+             I2C_STATUS_NONE,
+} _e_snfc_i2c_status;
+
 /* common */
 /* function feature */
 /* Only for L-01E DCM */
-#ifdef CONFIG_LGE_FELICA_DCM
+//#ifdef CONFIG_LGE_FELICA_DCM
 #define FELICA_LED_SUPPORT
-#endif
+//#endif
+
+#define FELICA_NFC_INTERFACE
 
 /* debug message */
 //#define FEATURE_DEBUG_LOW
@@ -92,8 +104,8 @@ typedef enum _e_snfc_uart_status {
  */
 //Must check each model's path in 'android/system/core/rootdir/init.rc'file
 #define FELICA_LD_LIBRARY_PATH "LD_LIBRARY_PATH=/vendor/lib:/system/lib"
-#define FELICA_BOOTCLASSPATH "BOOTCLASSPATH=/system/framework/core.jar:/system/framework/core-junit.jar:/system/framework/bouncycastle.jar:/system/framework/ext.jar:/system/framework/framework.jar:/system/framework/framework2.jar:/system/framework/android.policy.jar:/system/framework/services.jar:/system/framework/apache-xml.jar:/system/framework/filterfw.jar:/system/framework/com.lge.mass.jar:/system/framework/com.lge.core.jar"
-#define FELICA_PATH "PATH=/system/bin"
+#define FELICA_BOOTCLASSPATH "BOOTCLASSPATH=/system/framework/core.jar:/system/framework/core-junit.jar:/system/framework/bouncycastle.jar:/system/framework/ext.jar:/system/framework/framework.jar:/system/framework/framework_ext.jar:/system/framework/framework2.jar:/system/framework/android.policy.jar:/system/framework/services.jar:/system/framework/apache-xml.jar:/system/framework/com.lge.core.jar"
+#define FELICA_PATH "PATH=/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin"
 
 //Must check each model's VALUE from UART developer
 #define FELICA_IC2_NAME "/dev/i2c-0"
@@ -106,10 +118,14 @@ void destroy_felica_wake_lock(void);
 
 int get_felica_uart_status(void);
 void set_felica_uart_status(_e_snfc_uart_status uart_status);
+_e_snfc_i2c_status get_felica_i2c_status(void);
+void set_felica_i2c_status(_e_snfc_i2c_status i2c_status);
 
-#if defined(CONFIG_LGE_FELICA_KDDI)
+#if defined(CONFIG_LGE_FELICA_NFC)&& defined(FELICA_NFC_INTERFACE)
 extern _e_snfc_uart_status __snfc_uart_control_get_uart_status(void);
 extern void __snfc_uart_control_set_uart_status(_e_snfc_uart_status uart_status);
+extern _e_snfc_i2c_status __snfc_i2c_control_get_status(void);
+extern void __snfc_i2c_control_set_status(_e_snfc_i2c_status i2c_status);
 #endif
 
 #ifdef FELICA_LED_SUPPORT

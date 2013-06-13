@@ -1,4 +1,4 @@
-/* arch/arm/mach-msm/include/mach/board_j1sp.h
+/* arch/arm/mach-msm/include/mach/board_J1VD.h
  *
  * Copyright (C) 2007 Google, Inc.
  * Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
@@ -15,8 +15,8 @@
  *
  */
 
-#ifndef __ASM_ARCH_MSM_BOARD_J1SP_H
-#define __ASM_ARCH_MSM_BOARD_J1SP_H
+#ifndef __ASM_ARCH_MSM_BOARD_J1VD_H
+#define __ASM_ARCH_MSM_BOARD_J1VD_H
 
 #ifdef CONFIG_LGE_PM
 #define ADC_CHANGE_REV	HW_REV_EVB1
@@ -89,4 +89,4 @@
 #define C_NONE_USB_MA       500
 #endif
 	
-#endif // __ASM_ARCH_MSM_BOARD_J1SP_H
+#endif // __ASM_ARCH_MSM_BOARD_J1VD_H

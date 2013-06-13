@@ -31,24 +31,13 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
-#include <mach/gpio.h>
+#include <linux/gpio.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
-//#include "SynaImage.h"
-//#include "TM2000-E010-PR1084335-DS4_120211.h"
-
-
-/////////////////////////////////////
-//#ifdef CONFIG_TS_INFO_CLASS
-//#include "ts_class.h"
-//#endif
-
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
-
 #include <linux/input/lge_touch_core.h>
 #include <linux/input/touch_synaptics.h>
-
 
 /* Variables for F34 functionality */
 unsigned short SynaF34DataBase;
@@ -84,13 +73,10 @@ unsigned char *SynaconfigImgData;
 unsigned char *SynalockImgData;
 unsigned int SynafirmwareImgVersion;
 
-//unsigned char ConfigBlock[];
-//unsigned char FirmwareImage[16000];  // make smaller and dynamic
-//unsigned char ConfigImage[16000];  // make smaller and dynamic
-
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
+#ifdef CUST_G_TOUCH
 unsigned char *my_image_bin;
 unsigned long my_image_size;
+u8	fw_image_product_id[7];
 u8	fw_image_config_id[5];
 #endif
 
@@ -154,55 +140,41 @@ int FirmwareUpgrade(struct synaptics_ts_data *ts, const char* fw_path){
 		TOUCH_INFO_MSG("Touch FW image read %ld bytes from %s\n", read_bytes, fw_path);
 		
 	} else {
-		my_image_size = ts->fw_info->fw_size-1;
-		my_image_bin = (unsigned char *)(&ts->fw_info->fw_start[0]);
+#ifdef CUST_G_TOUCH
+		my_image_size = ts->fw_info.fw_size-1;
+		my_image_bin = (unsigned char *)(&ts->fw_info.fw_start[0]);
+#endif
 	}
 	
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
-
+#ifdef CUST_G_TOUCH
 	strncpy(fw_image_config_id, &my_image_bin[0xb100], 4);
-
-	TOUCH_INFO_MSG("fw_image_confid_id = %s\n", fw_image_config_id);
+	//if firmware version is less than E046(TM2000), E002(TM2372), product id is null
+	strncpy(fw_image_product_id, &my_image_bin[0x0040], 6);	
+	TOUCH_INFO_MSG("fw_image_confid_id = %s, fw_image_product_id=%s\n", fw_image_config_id, fw_image_product_id);
 
 	switch( ts->ic_panel_type ) {
-
-		case IC7020_G2_H_PTN_TPK:
-		case IC7020_G2_H_PTN_LGIT:
-#if defined(CONFIG_MACH_APQ8064_GKKT) || defined(CONFIG_MACH_APQ8064_GKSK) || defined(CONFIG_MACH_APQ8064_GKU)
-			TOUCH_INFO_MSG("TOUCH FIRMWARE UPGRADE (1)\n");
-			break;
-#else
-			if(fw_image_config_id[0] == 'E' && (int)simple_strtoul(&fw_image_config_id[1], NULL, 10) >= 27) {
-				TOUCH_INFO_MSG("Firmware Upgrade / IC is 7020, H pattern, panel is G2.\n");
+		case G_IC7020_G2_LGIT:		/* G */
+		case G_IC7020_G2_TPK:		/* G */
+		case GJ_IC7020_GFF_H_PTN: 	/* GJ */
+		case GV_IC7020_G2_H_PTN_LGIT: 	/* GV */
+		case GV_IC7020_G2_H_PTN_TPK :   /* GV */
+		case GK_IC7020_G1F: 		/* GK */
+		case GK_IC7020_GFF_SUNTEL:	/* GK */
+		case GK_IC7020_GFF_LGIT:	/* GK */
+		case GK_IC7020_GFF_LGIT_HYBRID:	/* GK */
+			if(!strcmp(ts->fw_info.product_id, fw_image_product_id)) {
+				TOUCH_INFO_MSG("TOUCH FIRMWARE UPGRADE ts->ic_panel_type=%d\n", ts->ic_panel_type);
 			} else {
-				TOUCH_ERR_MSG("Firmware Version mismatch / IC is 7020, H pattern, panel is G2.\n");
+				TOUCH_ERR_MSG("TOUCH FIRMWARE PRODUCT ID MISMATCH\n");
 				ret = -1;
 				goto fw_version_mismatch;
 			}
 			break;
-#endif
-
-		case IC7020_GFF_H_PTN:
-			if(fw_image_config_id[0] == 'E' && (int)simple_strtoul(&fw_image_config_id[1], NULL, 10) >= 1) {
-				TOUCH_INFO_MSG("Firmware Upgrade / IC is 7020, H pattern, panel is GFF.\n");
-			} else {
-				TOUCH_ERR_MSG("Firmware Version mismatch / IC is 7020, H pattern, panel is GFF.\n");
-				ret = -1;
-				goto fw_version_mismatch;
-			}
-			break;
-			
-
 		default:
-#if defined(CONFIG_MACH_APQ8064_GKKT) || defined(CONFIG_MACH_APQ8064_GKSK) || defined(CONFIG_MACH_APQ8064_GKU)
-			TOUCH_INFO_MSG("TOUCH FIRMWARE UPGRADE (2)\n");
-			break;
-#else
-			TOUCH_ERR_MSG("DO NOT UPDATE EXCEPT 7020 G2 H pattern\n");
+			TOUCH_ERR_MSG("DO NOT EXECUTE FW UPDATE\n");
 			ret = -1;
 			goto fw_version_mismatch;
 			break;
-#endif
 	}
 #endif
 	
@@ -212,9 +184,7 @@ int FirmwareUpgrade(struct synaptics_ts_data *ts, const char* fw_path){
 		TOUCH_ERR_MSG("CompleteReflash_Lockdown fail\n");
 	}
 
-#if defined(CONFIG_TOUCH_REG_MAP_TM2000) || defined(CONFIG_TOUCH_REG_MAP_TM2372)
 fw_version_mismatch:
-#endif
 	if(unlikely(fw_path[0] != 0))
 		kfree(my_image_bin);
 

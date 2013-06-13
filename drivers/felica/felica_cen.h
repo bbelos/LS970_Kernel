@@ -1,6 +1,6 @@
 /*
  *  felica_cen.h
- *  
+ *
  */
 #ifndef __FELICA_CEN_H__
 #define __FELICA_CEN_H__
@@ -10,7 +10,7 @@ extern "C" {
 #endif
 /*
  *  INCLUDE FILES FOR MODULE
- *  
+ *
  */
 #include <linux/list.h>
 

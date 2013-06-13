@@ -16,14 +16,6 @@
 #include <asm/io.h>
 
 
-/* LGE_CHANGE_S , [seongmook.yim], 2012-07-06, ATCMD, add AT%MDMLOG */
-#define MDMLOG
-/* LGE_CHANGE_E , [seongmook.yim], 2012-07-06, ATCMD, add AT%MDMLOG */
-
-#define ATD_HANDLE_SETCOM_ATCMD
-#define ATD_HANDLE_TSENS_ATCMD
-#define ATD_HANDLE_BATT_THEM_ATCMD
-
 /* for debug... */
 //#define ATCMD_DBG
 
@@ -67,22 +59,10 @@ static const char *atcmd_ap[] = {
     "%PTNCLR","%REATTACH","%RESTART","%SATPC","%LOGSAVE","%SCHK","%WALLPAPER","%SERIALNO","%SIMID","%SIMOFF",
     "%SIMPWDINIT","%SLEN","%SLTYPE","%SPM","%SUFFIX","%SULC","%SWOV","%SWV","%TETHER","%TOTALCRC",
     "%TOUCHFWVER","%ULCV","%ULCW","%USB","%VCOIN","%VLC","%VLST","%VSLT","%WLAN","%WLANR","%WLANT",
-#ifdef ATD_HANDLE_SETCOM_ATCMD
+    "%TSENS","%BATMP","%MDMPVS",
     "+CATLIST","+CTACT","+CCLGS","+CDUR","+CDVOL","+CEMAIL","+CWAP","+CDCONT","+CSYNC","+CBLTH","+CALRM",
     "+CTMRV","+CSMCT","+CWLNT","+CKSUM","+CNPAD","+CTASK","+CMSG","+CTBCPS","+CRST",
-#endif
-#ifdef ATD_HANDLE_TSENS_ATCMD
-    "%TSENS",
-#endif
-#ifdef ATD_HANDLE_BATT_THEM_ATCMD
-    "%BATMP",
-#endif
-
-/* LGE_CHANGE_S , [seongmook.yim], 2012-07-06, ATCMD, add AT%MDMLOG */
-#ifdef MDMLOG
-	"%MDMLOG",
-#endif
-/* LGE_CHANGE_E , [seongmook.yim], 2012-07-06, ATCMD, add AT%MDMLOG */
+    "+OMADM","+PRL","+FUMO","$PRL?",
 
     NULL
     //don't use "%QEM","+CKPD"
@@ -95,6 +75,7 @@ enum {
 
 static struct {
     struct gdata_port *port;
+    struct mutex lock;
 } atcmd_info;
 
 static ssize_t atcmd_write_tomdm(const char *buf, size_t count);
@@ -149,13 +130,10 @@ static int atcmd_to(const char *buf, size_t count)
     char *p;
 
     strncpy(atcmd_name, buf, count);
-    if ((p = strchr(atcmd_name, '=')) || (p = strchr(atcmd_name, '?')))
+    if ((p = strchr(atcmd_name, '=')) ||
+        (p = strchr(atcmd_name, '?')) ||
+        (p = strchr(atcmd_name, '\r')) )
     {
-        *p = '\0';
-    }
-    else
-    {
-        p = strchr(atcmd_name, '\r');
         *p = '\0';
     }
 
@@ -169,7 +147,8 @@ static int atcmd_to(const char *buf, size_t count)
             {
                 strncpy(atcmd_state, p, count);
                 p = strchr(atcmd_state, '\r');
-                *p = '\0';
+                if (p)
+                    *p = '\0';
             }
             else
             {
@@ -191,14 +170,16 @@ static int atcmd_to(const char *buf, size_t count)
 
 int atcmd_queue(const char *buf, size_t count)
 {
-    //struct gdata_port *port = atcmd_info.port;
     struct atcmd_request *req;
+    int ret = 1;
 
     if (count <= 0)
     {
         pr_debug("%s: count <= 0\n", __func__);
         return -1;
     }
+
+    mutex_lock(&atcmd_info.lock);
 
     /* atcmd_pool is empty or new pool */
     if (list_empty(&atcmd_pool) ||
@@ -210,22 +191,26 @@ int atcmd_queue(const char *buf, size_t count)
             strncasecmp(buf, "at$", 3) &&
             strncasecmp(buf, "at*", 3))
         {
-            return 0;
+            ret = 0;
+            goto out;
         }
         else if (count >= 2 && strncasecmp(buf, "at", 2))
         {
-            return 0;
+            ret = 0;
+            goto out;
         }
         else if (buf[0] != 'a' && buf[0] != 'A')
         {
-            return 0;
+            ret = 0;
+            goto out;
         }
 
         req = atcmd_alloc_req();
         if( req == NULL )
         {
             pr_err("can't alloc for req\n" ) ;
-            return -ENOMEM ;
+            ret = -ENOMEM ;
+            goto out;
         }
 
         list_add_tail(&req->list, &atcmd_pool);
@@ -271,7 +256,9 @@ int atcmd_queue(const char *buf, size_t count)
         }
     }
 
-    return 1;
+out:
+    mutex_unlock(&atcmd_info.lock);
+    return ret;
 }
 
 static int atcmd_write_tohost(const char *buf, size_t count)
@@ -376,11 +363,15 @@ static ssize_t atcmd_read(struct file *filp, char *buf, size_t count, loff_t *f_
         if (signal_pending(current))
             return -ERESTARTSYS;
 
+        mutex_lock(&atcmd_info.lock);
         req = list_first_entry(&atcmd_pool, struct atcmd_request, list);
     }
     else
     {
+        mutex_lock(&atcmd_info.lock);
         req = list_first_entry(&atcmd_pool, struct atcmd_request, list);
+        mutex_unlock(&atcmd_info.lock);
+
 #ifdef ATCMD_DBG
         pr_info("%s:2 sleeping?\n", __func__);
 #endif
@@ -388,6 +379,7 @@ static ssize_t atcmd_read(struct file *filp, char *buf, size_t count, loff_t *f_
 #ifdef ATCMD_DBG
         pr_info("%s:2 awake\n", __func__);
 #endif
+        mutex_lock(&atcmd_info.lock);
     }
 
     list_del(&req->list);
@@ -395,7 +387,7 @@ static ssize_t atcmd_read(struct file *filp, char *buf, size_t count, loff_t *f_
     if (req->status != 1)
     {
         atcmd_free_req(req);
-        return 0;
+        goto out;
     }
 
     memcpy(buf, req->buf, req->length);
@@ -408,6 +400,8 @@ static ssize_t atcmd_read(struct file *filp, char *buf, size_t count, loff_t *f_
 
     atcmd_free_req(req);
 
+out:
+    mutex_unlock(&atcmd_info.lock);
     return len;
 }
 
@@ -463,6 +457,8 @@ static __init int atcmd_init(void)
     atcmd_class->devnode = atcmd_dev_node;
     atcmd_dev = device_create(atcmd_class, NULL, MKDEV(atcmd_major, 0), NULL, "ttyGS0");
     atcmd_dev->class = atcmd_class;
+
+    mutex_init(&atcmd_info.lock);
 
     return 0;
 }

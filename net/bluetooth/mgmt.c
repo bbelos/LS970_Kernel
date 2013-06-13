@@ -24,6 +24,8 @@
 /* Bluetooth HCI Management interface */
 
 #include <linux/uaccess.h>
+#include <linux/interrupt.h>
+#include <linux/module.h>
 #include <asm/unaligned.h>
 
 #include <net/bluetooth/bluetooth.h>
@@ -226,6 +228,8 @@ static int read_controller_info(struct sock *sk, u16 index)
 	put_unaligned_le16(hdev->hci_rev, &rp.hci_rev);
 
 	memcpy(rp.name, hdev->dev_name, sizeof(hdev->dev_name));
+
+	rp.le_white_list_size = hdev->le_white_list_size;
 
 	hci_dev_unlock_bh(hdev);
 	hci_dev_put(hdev);
@@ -1448,6 +1452,185 @@ failed:
 	return err;
 }
 
+static int le_add_dev_white_list(struct sock *sk, u16 index,
+					unsigned char *data, u16 len)
+{
+	struct hci_dev *hdev;
+	struct mgmt_cp_le_add_dev_white_list *cp;
+	int err = 0;
+
+	BT_DBG("");
+
+	cp = (void *) data;
+
+	if (len != sizeof(*cp))
+		return cmd_status(sk, index, MGMT_OP_LE_ADD_DEV_WHITE_LIST,
+									EINVAL);
+
+	hdev = hci_dev_get(index);
+	if (!hdev)
+		return cmd_status(sk, index, MGMT_OP_LE_ADD_DEV_WHITE_LIST,
+									ENODEV);
+
+	hci_dev_lock_bh(hdev);
+
+	if (!test_bit(HCI_UP, &hdev->flags)) {
+		err = cmd_status(sk, index, MGMT_OP_LE_ADD_DEV_WHITE_LIST,
+								ENETDOWN);
+		goto failed;
+	}
+
+	hci_le_add_dev_white_list(hdev, &cp->bdaddr);
+
+failed:
+	hci_dev_unlock_bh(hdev);
+	hci_dev_put(hdev);
+
+	return err;
+}
+
+static int le_remove_dev_white_list(struct sock *sk, u16 index,
+					unsigned char *data, u16 len)
+{
+	struct hci_dev *hdev;
+	struct mgmt_cp_le_remove_dev_white_list *cp;
+	int err = 0;
+
+	BT_DBG("");
+
+	cp = (void *) data;
+
+	if (len != sizeof(*cp))
+		return cmd_status(sk, index, MGMT_OP_LE_REMOVE_DEV_WHITE_LIST,
+									EINVAL);
+
+	hdev = hci_dev_get(index);
+	if (!hdev)
+		return cmd_status(sk, index, MGMT_OP_LE_REMOVE_DEV_WHITE_LIST,
+									ENODEV);
+
+	hci_dev_lock_bh(hdev);
+
+	if (!test_bit(HCI_UP, &hdev->flags)) {
+		err = cmd_status(sk, index, MGMT_OP_LE_REMOVE_DEV_WHITE_LIST,
+								ENETDOWN);
+		goto failed;
+	}
+
+	hci_le_remove_dev_white_list(hdev, &cp->bdaddr);
+
+failed:
+	hci_dev_unlock_bh(hdev);
+	hci_dev_put(hdev);
+
+	return err;
+}
+
+static int le_create_conn_white_list(struct sock *sk, u16 index)
+{
+	struct hci_dev *hdev;
+	struct hci_conn *conn;
+	u8 sec_level, auth_type;
+	struct pending_cmd *cmd;
+	bdaddr_t bdaddr;
+	int err = 0;
+
+	BT_DBG("");
+
+	hdev = hci_dev_get(index);
+	if (!hdev)
+		return cmd_status(sk, index, MGMT_OP_LE_CREATE_CONN_WHITE_LIST,
+									ENODEV);
+
+	hci_dev_lock_bh(hdev);
+
+	if (!test_bit(HCI_UP, &hdev->flags)) {
+		err = cmd_status(sk, index, MGMT_OP_LE_CREATE_CONN_WHITE_LIST,
+								ENETDOWN);
+		goto failed;
+	}
+
+	cmd = mgmt_pending_add(sk, MGMT_OP_LE_CREATE_CONN_WHITE_LIST, index,
+								NULL, 0);
+	if (!cmd) {
+		err = -ENOMEM;
+		goto failed;
+	}
+
+	sec_level = BT_SECURITY_MEDIUM;
+	auth_type = HCI_AT_GENERAL_BONDING;
+	memset(&bdaddr, 0, sizeof(bdaddr));
+	conn = hci_le_connect(hdev, 0, BDADDR_ANY, sec_level, auth_type, NULL);
+	if (IS_ERR(conn)) {
+		err = PTR_ERR(conn);
+		mgmt_pending_remove(cmd);
+	}
+
+failed:
+	hci_dev_unlock_bh(hdev);
+	hci_dev_put(hdev);
+
+	return err;
+}
+
+static int le_cancel_create_conn_white_list(struct sock *sk, u16 index)
+{
+	struct hci_dev *hdev;
+	int err = 0;
+
+	BT_DBG("");
+
+	hdev = hci_dev_get(index);
+	if (!hdev)
+		return cmd_status(sk, index,
+			MGMT_OP_LE_CANCEL_CREATE_CONN_WHITE_LIST, ENODEV);
+
+	hci_dev_lock_bh(hdev);
+
+	if (!test_bit(HCI_UP, &hdev->flags)) {
+		err = cmd_status(sk, index,
+			MGMT_OP_LE_CANCEL_CREATE_CONN_WHITE_LIST, ENETDOWN);
+		goto failed;
+	}
+
+	hci_le_cancel_create_connect(hdev, BDADDR_ANY);
+
+failed:
+	hci_dev_unlock_bh(hdev);
+	hci_dev_put(hdev);
+
+	return err;
+}
+
+static int le_clear_white_list(struct sock *sk, u16 index)
+{
+	struct hci_dev *hdev;
+	int err;
+
+	BT_DBG("");
+
+	hdev = hci_dev_get(index);
+	if (!hdev)
+		return cmd_status(sk, index,
+			MGMT_OP_LE_CLEAR_WHITE_LIST, ENODEV);
+
+	hci_dev_lock_bh(hdev);
+
+	if (!test_bit(HCI_UP, &hdev->flags)) {
+		err = cmd_status(sk, index,
+			MGMT_OP_LE_CLEAR_WHITE_LIST, ENETDOWN);
+		goto failed;
+	}
+
+	err = hci_send_cmd(hdev, HCI_OP_LE_CLEAR_WHITE_LIST, 0, NULL);
+
+failed:
+	hci_dev_unlock_bh(hdev);
+	hci_dev_put(hdev);
+
+	return err;
+}
+
 static int set_io_capability(struct sock *sk, u16 index, unsigned char *data,
 									u16 len)
 {
@@ -1622,30 +1805,10 @@ static int pair_device(struct sock *sk, u16 index, unsigned char *data, u16 len)
 
 	hci_dev_lock_bh(hdev);
 
-// -s LGBT_COMMON_PATCH_SR00818097 fix the issue that is from security level set by EIR but EIR is not mandatory feature for 2.1 device sunmee.choi@lge.com 2012-04-10
-	/* QCT Original
-	BT_DBG("SSP Cap is %d", cp->ssp_cap);
-	*/
-// -e LGBT_COMMON_PATCH_SR00818097
 	io_cap = cp->io_cap;
-// *s LGBT_COMMON_PATCH_SR00818097 fix the issue that is from security level set by EIR but EIR is not mandatory feature for 2.1 device sunmee.choi@lge.com 2012-04-10
-// QCT Original
-//// *s LGBT_COMMON_PATCH_SR00818097 fix the issue that is from security level set by EIR but EIR is not mandatory feature for 2.1 device sunmee.choi@lge.com 2012-04-10
-//	/* QCT Original
-//	if ((cp->ssp_cap == 0) || (io_cap == 0x03)) {
-//	*/
-//	if (io_cap == 0x03) {
-//// *e LGBT_COMMON_PATCH_SR00818097
-//		sec_level = BT_SECURITY_MEDIUM;
-//		auth_type = HCI_AT_DEDICATED_BONDING;
-//	} else {
-//		sec_level = BT_SECURITY_HIGH;
-//		auth_type = HCI_AT_DEDICATED_BONDING_MITM;
-//	}
 
 	sec_level = BT_SECURITY_MEDIUM;
 	auth_type = HCI_AT_DEDICATED_BONDING;
-// *e LGBT_COMMON_PATCH_SR00818097
 
 	entry = hci_find_adv_entry(hdev, &cp->bdaddr);
 	if (entry && entry->flags & 0x04) {
@@ -2013,6 +2176,7 @@ void mgmt_inquiry_complete_evt(u16 index, u8 status)
 		err = hci_send_cmd(hdev, HCI_OP_LE_SET_SCAN_ENABLE,
 						sizeof(le_cp), &le_cp);
 		if (err >= 0) {
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project		
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 // Do not allocate too much time on BTLE scan. Use fixed 5 seconds. 
 //			mod_timer(&hdev->disco_le_timer, jiffies +
@@ -2021,6 +2185,7 @@ void mgmt_inquiry_complete_evt(u16 index, u8 status)
 			mod_timer(&hdev->disco_le_timer, jiffies + msecs_to_jiffies(2000));
 // +e LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE INQUIRY_5sec_SCAN_LE_2SEC_AND_NAME_REQ
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 			hdev->disco_state = SCAN_LE;
 		} else
 			hdev->disco_state = SCAN_IDLE;
@@ -2099,12 +2264,14 @@ void mgmt_disco_le_timeout(unsigned long data)
 	/* re-start BR scan */
 		if (hdev->disco_state != SCAN_IDLE) {
 			struct hci_cp_inquiry cp = {{0x33, 0x8b, 0x9e}, 4, 0};
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project			
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 //		hdev->disco_int_phase *= 2;
 //		hdev->disco_int_count = 0;
 //		cp.num_rsp = (u8) hdev->disco_int_phase;
 		cp.num_rsp = 0;
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 			hci_send_cmd(hdev, HCI_OP_INQUIRY, sizeof(cp), &cp);
 			hdev->disco_state = SCAN_BR;
 		}
@@ -2145,10 +2312,12 @@ static int start_discovery(struct sock *sk, u16 index)
 		struct hci_cp_le_set_scan_parameters le_cp;
 
 		/* Shorten BR scan params */
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project		
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 //		cp.num_rsp = 1;
         cp.num_rsp = 0;
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 		cp.length /= 2;
 
 		/* Setup LE scan params */
@@ -2175,13 +2344,16 @@ static int start_discovery(struct sock *sk, u16 index)
 		if (!cmd)
 			mgmt_pending_add(sk, MGMT_OP_STOP_DISCOVERY, index,
 								NULL, 0);
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project								
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 //		hdev->disco_int_phase = 1;
 //		hdev->disco_int_count = 0;
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 		hdev->disco_state = SCAN_BR;
 		del_timer(&hdev->disco_le_timer);
 		del_timer(&hdev->disco_timer);
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project		
 		// +s LGE: LGBT_COMMON_BUGFIX_INCREASE_DISCOVERY_TIME, [sh.shin@lge.com 20120330]
 		// increase discovery time from 20 sec to 50 sec.
 // +s LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE INQUIRY_5sec_SCAN_LE_2SEC_AND_NAME_REQ		
@@ -2189,6 +2361,7 @@ static int start_discovery(struct sock *sk, u16 index)
 			jiffies + msecs_to_jiffies(7000));
 // +e LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE INQUIRY_5sec_SCAN_LE_2SEC_AND_NAME_REQ
 		// +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project		
 	} else
 		hdev->disco_state = SCAN_BR;
 
@@ -2503,7 +2676,23 @@ int mgmt_control(struct sock *sk, struct msghdr *msg, size_t msglen)
 	case MGMT_OP_ENCRYPT_LINK:
 		err = encrypt_link(sk, index, buf + sizeof(*hdr), len);
 		break;
-
+	case MGMT_OP_LE_ADD_DEV_WHITE_LIST:
+		err = le_add_dev_white_list(sk, index, buf + sizeof(*hdr),
+									len);
+		break;
+	case MGMT_OP_LE_REMOVE_DEV_WHITE_LIST:
+		err = le_remove_dev_white_list(sk, index, buf + sizeof(*hdr),
+									len);
+		break;
+	case MGMT_OP_LE_CLEAR_WHITE_LIST:
+		err = le_clear_white_list(sk, index);
+		break;
+	case MGMT_OP_LE_CREATE_CONN_WHITE_LIST:
+		err = le_create_conn_white_list(sk, index);
+		break;
+	case MGMT_OP_LE_CANCEL_CREATE_CONN_WHITE_LIST:
+		err = le_cancel_create_conn_white_list(sk, index);
+		break;
 	default:
 		BT_DBG("Unknown op %u", opcode);
 		err = cmd_status(sk, index, opcode, 0x01);
@@ -2663,11 +2852,40 @@ int mgmt_new_key(u16 index, struct link_key *key, u8 bonded)
 int mgmt_connected(u16 index, bdaddr_t *bdaddr, u8 le)
 {
 	struct mgmt_ev_connected ev;
+	struct pending_cmd *cmd;
+	struct hci_dev *hdev;
+
+	BT_DBG("hci%u", index);
+
+	hdev = hci_dev_get(index);
+
+	if (!hdev)
+		return -ENODEV;
 
 	bacpy(&ev.bdaddr, bdaddr);
 	ev.le = le;
 
+	cmd = mgmt_pending_find(MGMT_OP_LE_CREATE_CONN_WHITE_LIST, index);
+	if (cmd) {
+		BT_ERR("mgmt_connected remove mgmt pending white_list");
+		mgmt_pending_remove(cmd);
+	}
+
 	return mgmt_event(MGMT_EV_CONNECTED, index, &ev, sizeof(ev), NULL);
+}
+
+int mgmt_le_conn_params(u16 index, bdaddr_t *bdaddr, u16 interval,
+						u16 latency, u16 timeout)
+{
+	struct mgmt_ev_le_conn_params ev;
+
+	bacpy(&ev.bdaddr, bdaddr);
+	ev.interval = interval;
+	ev.latency = latency;
+	ev.timeout = timeout;
+
+	return mgmt_event(MGMT_EV_LE_CONN_PARAMS, index, &ev, sizeof(ev),
+									NULL);
 }
 
 static void disconnect_rsp(struct pending_cmd *cmd, void *data)
@@ -2686,20 +2904,21 @@ static void disconnect_rsp(struct pending_cmd *cmd, void *data)
 	mgmt_pending_remove(cmd);
 }
 
-int mgmt_disconnected(u16 index, bdaddr_t *bdaddr)
+int mgmt_disconnected(u16 index, bdaddr_t *bdaddr, u8 reason)
 {
 	struct mgmt_ev_disconnected ev;
 	struct sock *sk = NULL;
 	int err;
 
-	mgmt_pending_foreach(MGMT_OP_DISCONNECT, index, disconnect_rsp, &sk);
-
 	bacpy(&ev.bdaddr, bdaddr);
+	ev.reason = reason;
 
 	err = mgmt_event(MGMT_EV_DISCONNECTED, index, &ev, sizeof(ev), sk);
 
 	if (sk)
 		sock_put(sk);
+
+	mgmt_pending_foreach(MGMT_OP_DISCONNECT, index, disconnect_rsp, &sk);
 
 	return err;
 }
@@ -3015,9 +3234,11 @@ int mgmt_device_found(u16 index, bdaddr_t *bdaddr, u8 type, u8 le,
 			u8 *dev_class, s8 rssi, u8 eir_len, u8 *eir)
 {
 	struct mgmt_ev_device_found ev;
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project	
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 //	struct hci_dev *hdev;
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 	int err;
 
 	BT_DBG("le: %d", le);
@@ -3040,6 +3261,7 @@ int mgmt_device_found(u16 index, bdaddr_t *bdaddr, u8 type, u8 le,
 	if (err < 0)
 		return err;
 
+// [S] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 // +s LGE: LGBT_COMMON_FUNCTION_SEARCH_PERFORMANCE, [sh.shin@lge.com 20120405]
 //	hdev = hci_dev_get(index);
 //
@@ -3075,6 +3297,7 @@ int mgmt_device_found(u16 index, bdaddr_t *bdaddr, u8 type, u8 le,
 //done:
 //	hci_dev_put(hdev);
 // +e
+// [E] LGE_BT: MOD/ilbeom.kim/'12-09-18 - [GK] Merged based on G project
 	return 0;
 }
 

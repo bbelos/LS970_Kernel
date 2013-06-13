@@ -17,6 +17,7 @@
 
 /* #define DEBUG */
 
+#include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -327,12 +328,14 @@ qup_i2c_pwr_mgmt(struct qup_i2c_dev *dev, unsigned int state)
 	dev->clk_state = state;
 	if (state != 0) {
 		clk_enable(dev->clk);
-		clk_enable(dev->pclk);
+		if (!dev->pdata->keep_ahb_clk_on)
+			clk_enable(dev->pclk);
 	} else {
 		qup_update_state(dev, QUP_RESET_STATE);
 		clk_disable(dev->clk);
 		qup_config_core_on_en(dev);
-		clk_disable(dev->pclk);
+		if (!dev->pdata->keep_ahb_clk_on)
+			clk_disable(dev->pclk);
 	}
 }
 
@@ -1324,6 +1327,12 @@ blsp_core_init:
 	dev->clk_state = 0;
 	clk_prepare(dev->clk);
 	clk_prepare(dev->pclk);
+	/* If the same AHB clock is used on Modem side
+	 * switch it on here itself and don't switch it
+	 * on and off during suspend and resume.
+	 */
+	if (dev->pdata->keep_ahb_clk_on)
+		clk_enable(dev->pclk);
 	setup_timer(&dev->pwr_timer, qup_i2c_pwr_timer, (unsigned long) dev);
 
 	pm_runtime_set_active(&pdev->dev);
@@ -1338,8 +1347,10 @@ blsp_core_init:
 		}
 		free_irq(dev->err_irq, dev);
 	} else {
-		if (dev->dev->of_node)
+		if (dev->dev->of_node) {
+			dev->adapter.dev.of_node = pdev->dev.of_node;
 			of_i2c_register_devices(&dev->adapter);
+		}
 		return 0;
 	}
 
@@ -1393,9 +1404,11 @@ qup_i2c_remove(struct platform_device *pdev)
 	free_irq(dev->err_irq, dev);
 	i2c_del_adapter(&dev->adapter);
 	clk_unprepare(dev->clk);
-	clk_unprepare(dev->pclk);
+	if (!dev->pdata->keep_ahb_clk_on) {
+		clk_unprepare(dev->pclk);
+		clk_put(dev->pclk);
+	}
 	clk_put(dev->clk);
-	clk_put(dev->pclk);
 	qup_i2c_free_gpios(dev);
 	if (dev->gsbi)
 		iounmap(dev->gsbi);
@@ -1431,7 +1444,8 @@ static int qup_i2c_suspend(struct device *device)
 	if (dev->clk_state != 0)
 		qup_i2c_pwr_mgmt(dev, 0);
 	clk_unprepare(dev->clk);
-	clk_unprepare(dev->pclk);
+	if (!dev->pdata->keep_ahb_clk_on)
+		clk_unprepare(dev->pclk);
 	qup_i2c_free_gpios(dev);
 	return 0;
 }
@@ -1442,7 +1456,8 @@ static int qup_i2c_resume(struct device *device)
 	struct qup_i2c_dev *dev = platform_get_drvdata(pdev);
 	BUG_ON(qup_i2c_request_gpios(dev) != 0);
 	clk_prepare(dev->clk);
-	clk_prepare(dev->pclk);
+	if (!dev->pdata->keep_ahb_clk_on)
+		clk_prepare(dev->pclk);
 	dev->suspended = 0;
 	return 0;
 }

@@ -573,6 +573,7 @@ struct adm_cmd_matrix_mute_v5 {
 
 /*  Payload of the #ADM_CMD_CONNECT_AFE_PORT_V5 command.*/
 struct adm_cmd_connect_afe_port_v5 {
+	struct apr_hdr     hdr;
 	u8                  mode;
 /* ID of the stream router (RX/TX). Use the
  * ADM_STRTR_ID_RX or ADM_STRTR_IDX macros
@@ -2322,6 +2323,9 @@ struct asm_softvolume_params {
 } __packed;
 
 #define ASM_END_POINT_DEVICE_MATRIX     0
+
+#define PCM_CHANNEL_NULL 0
+
 /* Front left channel. */
 #define PCM_CHANNEL_FL    1
 
@@ -2444,7 +2448,7 @@ struct asm_multi_channel_pcm_fmt_blk_v2 {
 } __packed;
 
 struct asm_stream_cmd_set_encdec_param {
-		u32                  param_id;
+	u32                  param_id;
 	/* ID of the parameter. */
 
 	u32                  param_size;
@@ -2572,9 +2576,6 @@ struct asm_aac_fmt_blk_v2 {
  * - 2 -- Stereo
  * - 6 -- 5.1 content
  */
-
-	u16          reserved;
-	/* Reserved. Clients must set this field to zero. */
 
 	u16          total_size_of_PCE_bits;
 /* greater or equal to zero. * -In case of RAW formats and
@@ -2985,6 +2986,8 @@ struct asm_wmastdv9_fmt_blk_v2 {
 
 	u16          enc_options;
 	/* Options used during encoding. */
+
+	u16          reserved;
 
 } __packed;
 
@@ -4495,7 +4498,6 @@ struct asm_ac3_generic_param {
 struct asm_dec_out_chan_map_param {
 	struct apr_hdr hdr;
 	struct asm_stream_cmd_set_encdec_param  encdec;
-	struct asm_enc_cfg_blk_param_v2	encblk;
 	u32                 num_channels;
 /* Number of decoder output channels.
  * Supported values: 0 to #MAX_CHAN_MAP_CHANNELS

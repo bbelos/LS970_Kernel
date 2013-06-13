@@ -11,6 +11,8 @@
 
 #include <linux/gpio.h>
 
+int gpio_rfs;
+
 
 /*
 * Description : 

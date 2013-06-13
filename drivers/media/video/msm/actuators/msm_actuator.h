@@ -51,8 +51,8 @@ struct msm_actuator_func_tbl {
 			struct msm_actuator_move_params_t *);
 	int32_t (*actuator_move_focus) (struct msm_actuator_ctrl_t *,
 			struct msm_actuator_move_params_t *);
-	int32_t (*actuator_i2c_write)(struct msm_actuator_ctrl_t *,
-			int16_t, uint32_t);
+	int32_t (*actuator_parse_i2c_params)(struct msm_actuator_ctrl_t *,
+			int16_t, uint32_t, uint16_t);
 	int32_t (*actuator_write_focus)(struct msm_actuator_ctrl_t *,
 			uint16_t,
 			struct damping_params_t *,
@@ -87,6 +87,9 @@ struct msm_actuator_ctrl_t {
 	uint32_t total_steps;
 	uint16_t pwd_step;
 	uint16_t initial_code;
+	struct msm_camera_i2c_reg_tbl *i2c_reg_tbl;
+	uint16_t i2c_tbl_index;
+        uint32_t curr_hwparams;
 /* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 	uint8_t AF_defocus_enable;
 	uint16_t AF_center_best_code;
@@ -99,41 +102,6 @@ struct msm_actuator_ctrl_t {
 };
 
 struct msm_actuator_ctrl_t *get_actrl(struct v4l2_subdev *sd);
-int32_t msm_actuator_i2c_write(struct msm_actuator_ctrl_t *a_ctrl,
-		int16_t next_lens_position, uint32_t hw_params);
-int32_t msm_actuator_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
-		uint16_t size, enum msm_actuator_data_type type,
-		struct reg_settings_t *settings);
-int32_t msm_actuator_i2c_write_b_af(struct msm_actuator_ctrl_t *a_ctrl,
-		uint8_t msb,
-		uint8_t lsb);
-int32_t msm_actuator_move_focus(struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_move_params_t *move_params);
-int32_t msm_actuator_piezo_move_focus(
-		struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_move_params_t *move_params);
-int32_t msm_actuator_init_step_table(struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_set_info_t *set_info);
-// Start LGE_BSP_CAMERA::seongjo.kim@lge.com 2012-07-20 Apply AF calibration data
-int32_t msm_actuator_init_step_table_use_eeprom(struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_set_info_t *set_info);
-// End LGE_BSP_CAMERA::seongjo.kim@lge.com 2012-07-20 Apply AF calibration data
-int32_t msm_actuator_set_default_focus(struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_move_params_t *move_params);
-int32_t msm_actuator_piezo_set_default_focus(
-		struct msm_actuator_ctrl_t *a_ctrl,
-		struct msm_actuator_move_params_t *move_params);
-int32_t msm_actuator_i2c_probe(struct i2c_client *client,
-		const struct i2c_device_id *id);
-int32_t msm_actuator_write_focus(struct msm_actuator_ctrl_t *a_ctrl,
-		uint16_t curr_lens_pos, struct damping_params_t *damping_params,
-		int8_t sign_direction, int16_t code_boundary);
-int32_t msm_actuator_write_focus2(struct msm_actuator_ctrl_t *a_ctrl,
-		uint16_t curr_lens_pos, struct damping_params_t *damping_params,
-		int8_t sign_direction, int16_t code_boundary);
-long msm_actuator_subdev_ioctl(struct v4l2_subdev *sd,
-			unsigned int cmd, void *arg);
-int32_t msm_actuator_power(struct v4l2_subdev *sd, int on);
 
 #define VIDIOC_MSM_ACTUATOR_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 11, void __user *)

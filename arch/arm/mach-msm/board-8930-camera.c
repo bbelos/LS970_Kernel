@@ -13,11 +13,13 @@
 
 #include <asm/mach-types.h>
 #include <linux/gpio.h>
-#include <mach/board.h>
+#include <mach/camera.h>
 #include <mach/msm_bus_board.h>
 #include <mach/gpiomux.h>
 #include "devices.h"
 #include "board-8930.h"
+
+#ifdef CONFIG_MSM_CAMERA
 
 #if (defined(CONFIG_GPIO_SX150X) || defined(CONFIG_GPIO_SX150X_MODULE)) && \
 	defined(CONFIG_I2C)
@@ -183,7 +185,6 @@ static struct msm_gpiomux_config msm8930_cam_2d_configs[] = {
 	},
 };
 
-#ifdef CONFIG_MSM_CAMERA
 #define VFE_CAMIF_TIMER1_GPIO 2
 #define VFE_CAMIF_TIMER2_GPIO 3
 #define VFE_CAMIF_TIMER3_GPIO_INT 4
@@ -230,7 +231,7 @@ static struct msm_bus_vectors cam_preview_vectors[] = {
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
 		.ab  = 27648000,
-		.ib  = 110592000,
+		.ib  = 2656000000UL,
 	},
 	{
 		.src = MSM_BUS_MASTER_VPE,
@@ -250,8 +251,8 @@ static struct msm_bus_vectors cam_video_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 140451840,
-		.ib  = 561807360,
+		.ab  = 600000000,
+		.ib  = 2656000000UL,
 	},
 	{
 		.src = MSM_BUS_MASTER_VPE,
@@ -271,8 +272,8 @@ static struct msm_bus_vectors cam_snapshot_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 274423680,
-		.ib  = 1097694720,
+		.ab  = 600000000,
+		.ib  = 2656000000UL,
 	},
 	{
 		.src = MSM_BUS_MASTER_VPE,
@@ -292,8 +293,8 @@ static struct msm_bus_vectors cam_zsl_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_VFE,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 302071680,
-		.ib  = 1208286720,
+		.ab  = 600000000,
+		.ib  = 2656000000UL,
 	},
 	{
 		.src = MSM_BUS_MASTER_VPE,
@@ -308,6 +309,70 @@ static struct msm_bus_vectors cam_zsl_vectors[] = {
 		.ib  = 1350000000,
 	},
 };
+
+static struct msm_bus_vectors cam_video_ls_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VFE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 600000000,
+		.ib  = 4264000000UL,
+	},
+	{
+		.src = MSM_BUS_MASTER_VPE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 206807040,
+		.ib  = 488816640,
+	},
+	{
+		.src = MSM_BUS_MASTER_JPEG_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 540000000,
+		.ib  = 1350000000,
+	},
+};
+
+static struct msm_bus_vectors cam_dual_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VFE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 302071680,
+		.ib  = 2656000000UL,
+	},
+	{
+		.src = MSM_BUS_MASTER_VPE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 206807040,
+		.ib  = 488816640,
+	},
+	{
+		.src = MSM_BUS_MASTER_JPEG_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 540000000,
+		.ib  = 1350000000,
+	},
+};
+
+static struct msm_bus_vectors cam_adv_video_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VFE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 274406400,
+		.ib  = 2656000000UL,
+	},
+	{
+		.src = MSM_BUS_MASTER_VPE,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 206807040,
+		.ib  = 488816640,
+	},
+	{
+		.src = MSM_BUS_MASTER_JPEG_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 0,
+		.ib  = 0,
+	},
+};
+
 
 static struct msm_bus_paths cam_bus_client_config[] = {
 	{
@@ -330,6 +395,19 @@ static struct msm_bus_paths cam_bus_client_config[] = {
 		ARRAY_SIZE(cam_zsl_vectors),
 		cam_zsl_vectors,
 	},
+	{
+		ARRAY_SIZE(cam_video_ls_vectors),
+		cam_video_ls_vectors,
+	},
+	{
+		ARRAY_SIZE(cam_dual_vectors),
+		cam_dual_vectors,
+	},
+	{
+		ARRAY_SIZE(cam_adv_video_vectors),
+		cam_adv_video_vectors,
+	},
+
 };
 
 static struct msm_bus_scale_pdata cam_bus_client_pdata = {
@@ -351,17 +429,11 @@ static struct msm_camera_device_platform_data msm_camera_csi_device_data[] = {
 	},
 };
 
-static struct camera_vreg_t msm_8930_back_cam_vreg[] = {
+static struct camera_vreg_t msm_8930_cam_vreg[] = {
 	{"cam_vdig", REG_LDO, 1200000, 1200000, 105000},
 	{"cam_vio", REG_VS, 0, 0, 0},
 	{"cam_vana", REG_LDO, 2800000, 2850000, 85600},
 	{"cam_vaf", REG_LDO, 2800000, 2850000, 300000},
-};
-
-static struct camera_vreg_t msm_8930_front_cam_vreg[] = {
-	{"cam_vio", REG_VS, 0, 0, 0},
-	{"cam_vana", REG_LDO, 2800000, 2850000, 85600},
-	{"cam_vdig", REG_LDO, 1200000, 1200000, 105000},
 };
 
 static struct gpio msm8930_common_cam_gpio[] = {
@@ -440,8 +512,8 @@ static struct msm_camera_csi_lane_params imx074_csi_lane_params = {
 
 static struct msm_camera_sensor_platform_info sensor_board_info_imx074 = {
 	.mount_angle	= 90,
-	.cam_vreg = msm_8930_back_cam_vreg,
-	.num_vreg = ARRAY_SIZE(msm_8930_back_cam_vreg),
+	.cam_vreg = msm_8930_cam_vreg,
+	.num_vreg = ARRAY_SIZE(msm_8930_cam_vreg),
 	.gpio_conf = &msm_8930_back_cam_gpio_conf,
 	.csi_lane_params = &imx074_csi_lane_params,
 };
@@ -458,13 +530,6 @@ static struct msm_camera_sensor_info msm_camera_sensor_imx074_data = {
 	.actuator_info = &msm_act_main_cam_0_info,
 };
 
-static struct camera_vreg_t msm_8930_mt9m114_vreg[] = {
-	{"cam_vio", REG_VS, 0, 0, 0},
-	{"cam_vdig", REG_LDO, 1200000, 1200000, 105000},
-	{"cam_vana", REG_LDO, 2800000, 2850000, 85600},
-	{"cam_vaf", REG_LDO, 2800000, 2850000, 300000},
-};
-
 static struct msm_camera_sensor_flash_data flash_mt9m114 = {
 	.flash_type = MSM_CAMERA_FLASH_NONE
 };
@@ -476,8 +541,8 @@ static struct msm_camera_csi_lane_params mt9m114_csi_lane_params = {
 
 static struct msm_camera_sensor_platform_info sensor_board_info_mt9m114 = {
 	.mount_angle = 90,
-	.cam_vreg = msm_8930_mt9m114_vreg,
-	.num_vreg = ARRAY_SIZE(msm_8930_mt9m114_vreg),
+	.cam_vreg = msm_8930_cam_vreg,
+	.num_vreg = ARRAY_SIZE(msm_8930_cam_vreg),
 	.gpio_conf = &msm_8930_front_cam_gpio_conf,
 	.csi_lane_params = &mt9m114_csi_lane_params,
 };
@@ -503,8 +568,8 @@ static struct msm_camera_csi_lane_params ov2720_csi_lane_params = {
 
 static struct msm_camera_sensor_platform_info sensor_board_info_ov2720 = {
 	.mount_angle	= 0,
-	.cam_vreg = msm_8930_front_cam_vreg,
-	.num_vreg = ARRAY_SIZE(msm_8930_front_cam_vreg),
+	.cam_vreg = msm_8930_cam_vreg,
+	.num_vreg = ARRAY_SIZE(msm_8930_cam_vreg),
 	.gpio_conf = &msm_8930_front_cam_gpio_conf,
 	.csi_lane_params = &ov2720_csi_lane_params,
 };
@@ -519,13 +584,6 @@ static struct msm_camera_sensor_info msm_camera_sensor_ov2720_data = {
 	.sensor_type = BAYER_SENSOR,
 };
 
-static struct camera_vreg_t msm_8930_s5k3l1yx_vreg[] = {
-	{"cam_vdig", REG_LDO, 1200000, 1200000, 105000},
-	{"cam_vana", REG_LDO, 2800000, 2850000, 85600},
-	{"cam_vio", REG_VS, 0, 0, 0},
-	{"cam_vaf", REG_LDO, 2800000, 2850000, 300000},
-};
-
 static struct msm_camera_sensor_flash_data flash_s5k3l1yx = {
 	.flash_type = MSM_CAMERA_FLASH_LED,
 	.flash_src = &msm_flash_src
@@ -538,8 +596,8 @@ static struct msm_camera_csi_lane_params s5k3l1yx_csi_lane_params = {
 
 static struct msm_camera_sensor_platform_info sensor_board_info_s5k3l1yx = {
 	.mount_angle  = 90,
-	.cam_vreg = msm_8930_s5k3l1yx_vreg,
-	.num_vreg = ARRAY_SIZE(msm_8930_s5k3l1yx_vreg),
+	.cam_vreg = msm_8930_cam_vreg,
+	.num_vreg = ARRAY_SIZE(msm_8930_cam_vreg),
 	.gpio_conf = &msm_8930_back_cam_gpio_conf,
 	.csi_lane_params = &s5k3l1yx_csi_lane_params,
 };
