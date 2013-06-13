@@ -85,6 +85,9 @@ uint8_t imx091_wb30calib_data[6];
 uint8_t imx091_afcalib_data[8]; //LGE
 uint8_t imx091_lsc50calib_data[884];
 uint8_t imx091_lsc40calib_data[884];
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+uint8_t imx091_af_defocus_data[11];
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 struct msm_calib_wb imx091_wb50_data;
 struct msm_calib_wb imx091_wb30_data;
 struct msm_calib_af imx091_af_data;
@@ -114,6 +117,9 @@ static struct msm_camera_eeprom_read_t imx091_eeprom_read_tbl[] = {
 	{0x38A, &imx091_lsc40calib_data[0], 884, 0}, //LSC A
 	{0x703, &imx091_afcalib_data[0], 8, 1}, //LGE need to change addr, size
 	{0x770, &imx091_Cal_ver, 1, 0}, // LGE_BSP_CAMERA::kyounghoon.noh@lge.com 2012-08-14
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+	{0x850, &imx091_af_defocus_data[0], 11, 0}, //20120926, hyungmoo.huh@lge.com, for AF offset
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 };
 
 static struct msm_camera_eeprom_data_t imx091_eeprom_data_tbl[] = {

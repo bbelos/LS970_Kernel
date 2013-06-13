@@ -165,6 +165,10 @@ int32_t msm_actuator_write_focus(
 	int16_t next_lens_pos = 0;
 	uint16_t damping_code_step = 0;
 	uint16_t wait_time = 0;
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+       uint16_t AF_offset_direction=0;
+	uint16_t AF_offset = 0;
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 
 	damping_code_step = damping_params->damping_step;
 	wait_time = damping_params->damping_delay;
@@ -207,6 +211,35 @@ int32_t msm_actuator_write_focus(
 		curr_lens_pos = next_lens_pos;
 		usleep(wait_time);
 	}
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+
+			printk("#### code_boundary : %d, a_ctrl->af_status = %d ####\n", code_boundary, a_ctrl->af_status);
+			if((a_ctrl->af_status==6)  && (a_ctrl->AF_defocus_enable==1))  //af_status : 6 = Last AF
+			{
+				AF_offset_direction = 0x8000 & ( a_ctrl->AF_LG_defocus_offset);
+				AF_offset = 0x7FFF & ( a_ctrl->AF_LG_defocus_offset);
+
+				if (0x8000==AF_offset_direction)
+				{
+					AF_offset = ~(AF_offset |0x8000) + 1;
+
+					if (AF_offset > 30)
+						AF_offset =0;
+
+					code_boundary = code_boundary -AF_offset;
+				}
+				else
+				{
+					if (AF_offset > 30)
+						AF_offset =0;
+					code_boundary = code_boundary + AF_offset;
+
+				}
+
+				printk("#### Last AF 1, code : %d, offset : %d !!! ####\n", code_boundary, a_ctrl->AF_LG_defocus_offset);
+			}
+			printk("#### %s : code_boundary = %d, state = %d ####\n",__func__, code_boundary, a_ctrl->af_status);
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 
 	if (curr_lens_pos != code_boundary) {
 		rc = a_ctrl->func_tbl->
@@ -260,6 +293,9 @@ int32_t msm_actuator_move_focus(
 		__func__,
 		dir,
 		num_steps);
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+	a_ctrl->af_status = move_params->af_status;
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 
 	if (dest_step_pos == a_ctrl->curr_step_pos)
 		return rc;
@@ -356,6 +392,10 @@ int32_t msm_actuator_move_focus(
 extern uint8_t imx091_afcalib_data[8];
 extern uint8_t imx111_afcalib_data[4];
 
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+extern uint8_t imx091_af_defocus_data[11];
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+
 int32_t msm_actuator_init_step_table_use_eeprom(struct msm_actuator_ctrl_t *a_ctrl,
 	struct msm_actuator_set_info_t *set_info)
 {
@@ -382,6 +422,30 @@ int32_t msm_actuator_init_step_table_use_eeprom(struct msm_actuator_ctrl_t *a_ct
 			imx091_afcalib_data[2];
 	printk("[QCTK_EEPROM][IMX091] %s: act_start = %d\n",__func__,act_start);
 	printk("[QCTK_EEPROM][IMX091] %s: act_macro = %d\n",__func__,act_macro);
+/* LGE_CHANGE_S, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
+    printk("####  imx091_af_defocus_data 0 = %x ####\n",imx091_af_defocus_data[0]);
+    printk("####  imx091_af_defocus_data 1 = %x ####\n",imx091_af_defocus_data[1]);
+    printk("####  imx091_af_defocus_data 2 = %x ####\n",imx091_af_defocus_data[2]);
+    printk("####  imx091_af_defocus_data 3 = %x ####\n",imx091_af_defocus_data[3]);
+    printk("####  imx091_af_defocus_data 4 = %x ####\n",imx091_af_defocus_data[4]);
+    printk("####  imx091_af_defocus_data 5 = %x ####\n",imx091_af_defocus_data[5]);
+    printk("####  imx091_af_defocus_data 6 = %x ####\n",imx091_af_defocus_data[6]);
+
+
+    a_ctrl->AF_defocus_enable = (uint8_t) imx091_af_defocus_data[0];
+    a_ctrl->AF_center_best_code = (uint16_t) (imx091_af_defocus_data[1] << 8) |imx091_af_defocus_data[2];
+    a_ctrl->AF_balance_best_code = (uint16_t) (imx091_af_defocus_data[3] << 8) |imx091_af_defocus_data[4];
+    a_ctrl->AF_defocus_offset = (uint16_t) (imx091_af_defocus_data[5] << 8) |imx091_af_defocus_data[6];
+	a_ctrl->AF_LG_center_best_code = (uint16_t) (imx091_af_defocus_data[7] << 8) |imx091_af_defocus_data[8];
+    a_ctrl->AF_LG_defocus_offset = (uint16_t) (imx091_af_defocus_data[9] << 8) |imx091_af_defocus_data[10];
+
+    printk("####  AF_defocus_enable = %d ####\n",a_ctrl->AF_defocus_enable);
+    printk("####  AF_center_best_code = %d ####\n",a_ctrl->AF_center_best_code);
+    printk("####  AF_balance_best_code = %d ####\n",a_ctrl->AF_balance_best_code);
+    printk("####  AF_defocus_offset = %d ####\n",a_ctrl->AF_defocus_offset);
+	printk("####  AF_LG_center_best_code = %d ####\n",a_ctrl->AF_LG_center_best_code);
+    printk("####  AF_LG_defocus_offset = %d ####\n",a_ctrl->AF_LG_defocus_offset);
+/* LGE_CHANGE_E, AF offset enable, 2012-09-28, sungmin.woo@lge.com */
 	#else
 	act_start = (uint16_t)(imx111_afcalib_data[1] << 8) |
 			imx111_afcalib_data[0];
